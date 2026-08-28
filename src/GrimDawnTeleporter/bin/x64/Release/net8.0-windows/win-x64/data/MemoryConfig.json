@@ -1,0 +1,40 @@
+{
+  "ProcessName": "Grim Dawn",
+  "GameExePath": "K:\\SteamLibrary\\steamapps\\common\\Grim Dawn\\Grim Dawn.exe",
+  "GameExePathX86": "K:\\SteamLibrary\\steamapps\\common\\Grim Dawn\\Grim Dawn.exe",
+  "GameExePathX64": "K:\\SteamLibrary\\steamapps\\common\\Grim Dawn\\x64\\Grim Dawn.exe",
+  "PreferredArchitecture": "Auto",
+  "CoordinateAddress": {
+    "ModuleName": "grim dawn.exe",
+    "BaseOffset": "0x14368",
+    "XOffsets": [
+      "0x1A28"
+    ],
+    "YOffsets": [
+      "0x1A2C"
+    ],
+    "ZOffsets": [
+      "0x1A30"
+    ]
+  },
+  "CoordinateAddressX86": {
+    "ModuleName": "grim dawn.exe",
+    "BaseOffset": "0x14368",
+    "XOffsets": [
+      "0x1A28"
+    ],
+    "YOffsets": [
+      "0x1A2C"
+    ],
+    "ZOffsets": [
+      "0x1A30"
+    ]
+  },
+  "CoordinateAddressX64": {
+    "ModuleName": "Grim Dawn.exe",
+    "BaseOffset": "0x0",
+    "XOffsets": [],
+    "YOffsets": [],
+    "ZOffsets": []
+  }
+}

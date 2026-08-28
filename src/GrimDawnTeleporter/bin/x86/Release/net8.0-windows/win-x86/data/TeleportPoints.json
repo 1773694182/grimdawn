@@ -1,0 +1,16 @@
+{
+  "Game": "Grim Dawn",
+  "Mode": "x86",
+  "Points": [
+    {
+      "Name": "\u5E93\u6069\u5821",
+      "X": -5993.29,
+      "Y": 29.3432,
+      "Z": 628.284,
+      "Area": "campaign",
+      "Note": "\u4ECE Grim Internals \u5BFC\u5165",
+      "CreatedAt": "2026-08-18T20:45:50.3830424+08:00",
+      "CoordinateText": "-5993.29, 29.343, 628.284"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Platforms>x86;x64</Platforms>
+    <PlatformTarget>$(Platform)</PlatformTarget>
+    <RuntimeIdentifier Condition="'$(Platform)' == 'x86'">win-x86</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(Platform)' == 'x64'">win-x64</RuntimeIdentifier>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\..\data\MemoryConfig.json" Link="data\MemoryConfig.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="CopyNativePlugin" AfterTargets="Build" Condition="'$(Platform)' == 'x64'">
+    <Copy SourceFiles="..\GrimDawnTeleporter.Plugin\bin\x64\$(Configuration)\GrimDawnTeleporter.Plugin.dll"
+          DestinationFolder="$(OutputPath)"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true" />
+  </Target>
+</Project>

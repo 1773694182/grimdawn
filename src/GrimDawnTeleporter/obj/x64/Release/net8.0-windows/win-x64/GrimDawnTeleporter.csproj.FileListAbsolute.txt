@@ -1,0 +1,32 @@
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-build-x64\data\MemoryConfig.json
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-build-x64\GrimDawnTeleporter.exe
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-build-x64\GrimDawnTeleporter.deps.json
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-build-x64\GrimDawnTeleporter.runtimeconfig.json
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-build-x64\GrimDawnTeleporter.dll
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-build-x64\GrimDawnTeleporter.pdb
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\MainWindow.baml
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\MainWindow.g.cs
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\App.g.cs
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter_MarkupCompile.cache
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.g.resources
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.GeneratedMSBuildEditorConfig.editorconfig
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.AssemblyInfoInputs.cache
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.AssemblyInfo.cs
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.csproj.CoreCompileInputs.cache
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.dll
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\refint\GrimDawnTeleporter.dll
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.pdb
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.genruntimeconfig.cache
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\ref\GrimDawnTeleporter.dll
+H:\github\grim dawn\src\GrimDawnTeleporter\bin\x64\Release\net8.0-windows\win-x64\data\MemoryConfig.json
+H:\github\grim dawn\src\GrimDawnTeleporter\bin\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.exe
+H:\github\grim dawn\src\GrimDawnTeleporter\bin\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.deps.json
+H:\github\grim dawn\src\GrimDawnTeleporter\bin\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.runtimeconfig.json
+H:\github\grim dawn\src\GrimDawnTeleporter\bin\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.dll
+H:\github\grim dawn\src\GrimDawnTeleporter\bin\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.pdb
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-launcher-x64\data\MemoryConfig.json
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-launcher-x64\GrimDawnTeleporter.exe
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-launcher-x64\GrimDawnTeleporter.deps.json
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-launcher-x64\GrimDawnTeleporter.runtimeconfig.json
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-launcher-x64\GrimDawnTeleporter.dll
+C:\Users\17736\AppData\Local\Temp\opencode\gdt-launcher-x64\GrimDawnTeleporter.pdb
