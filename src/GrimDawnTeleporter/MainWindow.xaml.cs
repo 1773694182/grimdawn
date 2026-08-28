@@ -32,7 +32,6 @@ public partial class MainWindow : Window
     private HotkeyService? _hotkeyService;
     private Coordinate3? _currentCoordinate;
     private Coordinate3? _lastPluginPosition;
-    private readonly UnknownCoordinateScanner _unknownScanner = new();
 
     public MainWindow()
     {
@@ -99,16 +98,6 @@ public partial class MainWindow : Window
         });
     }
 
-    private void StartGameX86_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            _memoryConfig.PreferredArchitecture = "x86";
-            var process = _processService.StartGame(_memoryConfig.GameExePathX86);
-            SetStatus($"已启动 x86 游戏：PID {process.Id}");
-        });
-    }
-
     private void AttachPlugin_Click(object sender, RoutedEventArgs e)
     {
         RunSafely(() =>
@@ -125,108 +114,6 @@ public partial class MainWindow : Window
             var info = _teleportService.GetGameProcess();
             var response = _pluginIpcClient.Send(info.Process.Id, "{\"type\":\"get_status\"}");
             SetStatus($"插件响应：{response}");
-        });
-    }
-
-    private void PluginCoreSymbols_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, "resolve_core");
-            SetStatus($"核心符号：{response}");
-        });
-    }
-
-    private void PluginDiagnoseSymbols_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, "diagnose_symbols");
-            SetStatus($"符号诊断：{response}");
-        });
-    }
-
-    private void PluginDiagnoseAob_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, "diagnose_aob");
-            SetStatus($"AOB 诊断：{response}");
-        });
-    }
-
-    private void PluginReadPosition_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            var coordinate = ReadPluginCoordinate();
-            SetStatus($"插件坐标：{coordinate}");
-        });
-    }
-
-    private void StartGameX64_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            if (!Environment.Is64BitProcess)
-            {
-                throw new InvalidOperationException("请使用 x64 版本 GrimDawnTeleporter.exe 启动和操作 x64 游戏。");
-            }
-
-            _memoryConfig.PreferredArchitecture = "x64";
-            var process = _processService.StartGame(_memoryConfig.GameExePathX64);
-            SetStatus($"已启动 x64 游戏：PID {process.Id}");
-        });
-    }
-
-    private void ReadCoordinate_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() => ReadCurrentCoordinate());
-    }
-
-    private void AutoScanCoordinate_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            var point = GetSelectedPoint();
-            var result = MessageBox.Show(this,
-                $"请确认角色当前正站在选中传送点附近：\n\n{point.Name}\n{point.CoordinateText}\n\n工具将扫描当前游戏内存中相邻的 X/Y/Z float。扫描结果仅本次游戏运行有效。",
-                "自动扫描坐标地址",
-                MessageBoxButton.OKCancel,
-                MessageBoxImage.Information);
-
-            if (result != MessageBoxResult.OK)
-            {
-                return;
-            }
-
-            var address = _teleportService.AutoScanFromKnownPoint(point, 0.75f);
-            SetStatus($"已启用本次会话动态坐标地址：{address}");
-            ReadCurrentCoordinate();
-        });
-    }
-
-    private void GeneratePointerChain_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            var result = MessageBox.Show(this,
-                "将基于当前自动扫描得到的动态坐标地址反向扫描指针链。扫描可能需要一段时间，期间窗口可能短暂无响应。\n\n建议先确认“读取坐标”能正常随角色移动变化。",
-                "生成稳定指针链",
-                MessageBoxButton.OKCancel,
-                MessageBoxImage.Information);
-
-            if (result != MessageBoxResult.OK)
-            {
-                return;
-            }
-
-            var config = _teleportService.GeneratePointerChainConfig();
-            _configService.SaveMemoryConfig(_memoryConfig);
-            SetStatus($"已生成并保存指针链：{config.ModuleName}+{config.BaseOffset}");
         });
     }
 
@@ -250,64 +137,6 @@ public partial class MainWindow : Window
             RefreshGroupPanel();
             SelectPoint(point);
             SetStatus($"已记录当前位置：{point.Name} ({point.CoordinateText})");
-        });
-    }
-
-    private void UnknownScanStart_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            var result = MessageBox.Show(this,
-                "请让角色站在原地不要移动，然后开始扫描。第一次扫描会收集大量候选。",
-                "未知坐标扫描",
-                MessageBoxButton.OKCancel,
-                MessageBoxImage.Information);
-
-            if (result != MessageBoxResult.OK)
-            {
-                return;
-            }
-
-            _unknownScanner.Reset(_teleportService.ScanUnknownCoordinateCandidates());
-            SetStatus($"未知坐标扫描已开始，候选数量：{_unknownScanner.Candidates.Count}。请保持静止，点击“静止过滤”。");
-        });
-    }
-
-    private void UnknownScanUnchanged_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            EnsureUnknownScanStarted();
-            var before = _unknownScanner.Candidates.Count;
-            _unknownScanner.KeepUnchanged(_teleportService.RefreshUnknownCoordinateCandidates(_unknownScanner.Candidates), 0.05f);
-            SetStatus($"静止过滤完成，候选数量：{_unknownScanner.Candidates.Count}，过滤掉 {before - _unknownScanner.Candidates.Count} 个。请移动一小段距离后点击“移动过滤”。");
-        });
-    }
-
-    private void UnknownScanChanged_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            EnsureUnknownScanStarted();
-            var before = _unknownScanner.Candidates.Count;
-            _unknownScanner.KeepChanged(_teleportService.RefreshUnknownCoordinateCandidates(_unknownScanner.Candidates), 0.1f);
-            var removed = before - _unknownScanner.Candidates.Count;
-            SetStatus(removed == 0
-                ? $"移动过滤未检测到变化候选，候选数量保持：{_unknownScanner.Candidates.Count}。请在游戏里多走几步后再点“移动过滤”。"
-                : $"移动过滤完成，候选数量：{_unknownScanner.Candidates.Count}，过滤掉 {removed} 个。候选较少后点击“使用候选”。");
-        });
-    }
-
-    private void UnknownScanUse_Click(object sender, RoutedEventArgs e)
-    {
-        RunSafely(() =>
-        {
-            EnsureUnknownScanStarted();
-            var candidate = _unknownScanner.Candidates.First();
-            var coordinate = _teleportService.UseUnknownCoordinateCandidate(candidate);
-            _currentCoordinate = coordinate;
-            CurrentCoordinateText.Text = coordinate.ToString();
-            SetStatus($"已使用未知扫描候选作为当前坐标地址：{coordinate}。请移动后再次读取验证。");
         });
     }
 
@@ -724,14 +553,6 @@ public partial class MainWindow : Window
     private TeleportPoint GetSelectedPoint()
     {
         return PointsGrid.SelectedItem as TeleportPoint ?? throw new InvalidOperationException("请先选择一个传送点。");
-    }
-
-    private void EnsureUnknownScanStarted()
-    {
-        if (_unknownScanner.Candidates.Count == 0)
-        {
-            throw new InvalidOperationException("请先点击“未知扫描开始”。");
-        }
     }
 
     private static int ParseCurrencyValue(string text, string fieldName)
