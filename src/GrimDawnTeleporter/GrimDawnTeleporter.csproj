@@ -14,10 +14,15 @@
   <ItemGroup>
     <None Include="..\..\data\MemoryConfig.json" Link="data\MemoryConfig.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-  <Target Name="CopyNativePlugin" AfterTargets="Build" Condition="'$(Platform)' == 'x64'">
-    <Copy SourceFiles="..\GrimDawnTeleporter.Plugin\bin\x64\$(Configuration)\GrimDawnTeleporter.Plugin.dll"
+  <PropertyGroup Condition="'$(Platform)' == 'x64'">
+    <NativePluginPath>..\GrimDawnTeleporter.Plugin\bin\x64\$(Configuration)\GrimDawnTeleporter.Plugin.dll</NativePluginPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Platform)' == 'x64' and !Exists('$(NativePluginPath)') and Exists('..\GrimDawnTeleporter.Plugin\bin\x64\Release\GrimDawnTeleporter.Plugin.dll')">
+    <NativePluginPath>..\GrimDawnTeleporter.Plugin\bin\x64\Release\GrimDawnTeleporter.Plugin.dll</NativePluginPath>
+  </PropertyGroup>
+  <Target Name="CopyNativePlugin" AfterTargets="Build" Condition="'$(Platform)' == 'x64' and Exists('$(NativePluginPath)')">
+    <Copy SourceFiles="$(NativePluginPath)"
           DestinationFolder="$(OutputPath)"
-          SkipUnchangedFiles="true"
-          ContinueOnError="true" />
+          SkipUnchangedFiles="true" />
   </Target>
 </Project>

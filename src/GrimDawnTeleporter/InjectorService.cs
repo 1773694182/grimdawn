@@ -159,8 +159,15 @@ public sealed class InjectorService
             return local;
         }
 
-        var dev = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "GrimDawnTeleporter.Plugin", "bin", "x64", "Release", "GrimDawnTeleporter.Plugin.dll"));
-        return dev;
+        var srcDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var devRelease = Path.Combine(srcDirectory, "GrimDawnTeleporter.Plugin", "bin", "x64", "Release", "GrimDawnTeleporter.Plugin.dll");
+        if (File.Exists(devRelease))
+        {
+            return devRelease;
+        }
+
+        var devDebug = Path.Combine(srcDirectory, "GrimDawnTeleporter.Plugin", "bin", "x64", "Debug", "GrimDawnTeleporter.Plugin.dll");
+        return devDebug;
     }
 
     private static IntPtr CreateRemoteThreadWithFallback(IntPtr processHandle, IntPtr parameter, List<(string Source, IntPtr Address)> candidates)

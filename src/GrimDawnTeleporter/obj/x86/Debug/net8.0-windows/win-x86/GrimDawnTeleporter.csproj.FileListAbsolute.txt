@@ -18,3 +18,4 @@ H:\github\grim dawn\src\GrimDawnTeleporter\obj\x86\Debug\net8.0-windows\win-x86\
 H:\github\grim dawn\src\GrimDawnTeleporter\obj\x86\Debug\net8.0-windows\win-x86\GrimDawnTeleporter.pdb
 H:\github\grim dawn\src\GrimDawnTeleporter\obj\x86\Debug\net8.0-windows\win-x86\GrimDawnTeleporter.genruntimeconfig.cache
 H:\github\grim dawn\src\GrimDawnTeleporter\obj\x86\Debug\net8.0-windows\win-x86\ref\GrimDawnTeleporter.dll
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x86\Debug\net8.0-windows\win-x86\GrimDawnTeleporter.sourcelink.json

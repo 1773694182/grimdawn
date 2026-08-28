@@ -311,6 +311,27 @@ public partial class MainWindow : Window
         });
     }
 
+    private void CurrencyApiRead_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var value = ReadMoneyThroughPlugin();
+            CurrencyCurrentBox.Text = value.ToString(CultureInfo.InvariantCulture);
+            SetStatus($"已通过游戏 API 读取当前货币：{value}");
+        });
+    }
+
+    private void CurrencyApiSet_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var targetValue = ParseCurrencyValue(CurrencyTargetBox.Text, "目标货币数量");
+            var value = SetMoneyThroughPlugin(targetValue);
+            CurrencyCurrentBox.Text = value.ToString(CultureInfo.InvariantCulture);
+            SetStatus($"已通过游戏 API 设置货币：{value}");
+        });
+    }
+
     private void TeleportSelected_Click(object sender, RoutedEventArgs e)
     {
         RunSafely(() =>
@@ -674,6 +695,32 @@ public partial class MainWindow : Window
         return coordinate;
     }
 
+    private uint ReadMoneyThroughPlugin()
+    {
+        var info = _teleportService.GetGameProcess();
+        if (info.IsX86)
+        {
+            throw new InvalidOperationException("游戏 API 货币读取仅支持 x64 Grim Dawn。");
+        }
+
+        AttachPluginIfNeeded(info.Process.Id);
+        var response = _pluginIpcClient.Send(info.Process.Id, "get_money");
+        return ParseMoneyResponse(response);
+    }
+
+    private uint SetMoneyThroughPlugin(int targetValue)
+    {
+        var info = _teleportService.GetGameProcess();
+        if (info.IsX86)
+        {
+            throw new InvalidOperationException("游戏 API 货币设置仅支持 x64 Grim Dawn。");
+        }
+
+        AttachPluginIfNeeded(info.Process.Id);
+        var response = _pluginIpcClient.Send(info.Process.Id, $"set_money:{targetValue}");
+        return ParseMoneyResponse(response);
+    }
+
     private TeleportPoint GetSelectedPoint()
     {
         return PointsGrid.SelectedItem as TeleportPoint ?? throw new InvalidOperationException("请先选择一个传送点。");
@@ -685,6 +732,16 @@ public partial class MainWindow : Window
         {
             throw new InvalidOperationException("请先点击“未知扫描开始”。");
         }
+    }
+
+    private static int ParseCurrencyValue(string text, string fieldName)
+    {
+        if (!int.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) || value < 0)
+        {
+            throw new InvalidOperationException($"请输入有效的{fieldName}，只能使用 0 到 {int.MaxValue} 的整数。");
+        }
+
+        return value;
     }
 
     private static Coordinate3 ParsePositionResponse(string response)
@@ -700,6 +757,29 @@ public partial class MainWindow : Window
             root.GetProperty("x").GetSingle(),
             root.GetProperty("y").GetSingle(),
             root.GetProperty("z").GetSingle());
+    }
+
+    private static uint ParseMoneyResponse(string response)
+    {
+        using var document = JsonDocument.Parse(response);
+        var root = document.RootElement;
+        if (root.TryGetProperty("type", out var errorType) && string.Equals(errorType.GetString(), "error", StringComparison.OrdinalIgnoreCase))
+        {
+            var message = root.TryGetProperty("message", out var messageProperty) ? messageProperty.GetString() : response;
+            if (string.Equals(message, "unknown command", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("当前游戏进程里加载的是旧版 GrimDawnTeleporter.Plugin.dll，不支持货币 API 命令。请关闭游戏和工具，运行 stop-teleporter.bat、build-release.bat 后重新启动 x64 游戏和 x64 工具。");
+            }
+
+            throw new InvalidOperationException($"插件读取货币失败：{message}");
+        }
+
+        if (!root.TryGetProperty("type", out var type) || !string.Equals(type.GetString(), "money", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"插件未返回货币数量：{response}");
+        }
+
+        return root.GetProperty("value").GetUInt32();
     }
 
     private static void EnsurePluginResponseType(string response, string expectedType)

@@ -167,6 +167,10 @@
                     <Button Content="静止过滤" Margin="6,4,0,0" Padding="14,8" Click="UnknownScanUnchanged_Click" />
                     <Button Content="移动过滤" Margin="6,4,0,0" Padding="14,8" Click="UnknownScanChanged_Click" />
                     <Button Content="使用候选" Margin="6,4,0,0" Padding="14,8" Click="UnknownScanUse_Click" />
+                    <TextBox x:Name="CurrencyCurrentBox" Width="110" Margin="18,4,0,0" VerticalContentAlignment="Center" IsReadOnly="True" ToolTip="通过游戏 API 读取的当前货币数量" />
+                    <TextBox x:Name="CurrencyTargetBox" Width="110" Margin="18,4,0,0" VerticalContentAlignment="Center" ToolTip="输入要写入的目标货币数量" />
+                    <Button Content="读取货币(API)" Margin="6,4,0,0" Padding="14,8" Click="CurrencyApiRead_Click" />
+                    <Button Content="设置货币(API)" Margin="6,4,0,0" Padding="14,8" Click="CurrencyApiSet_Click" />
                 </WrapPanel>
             </Expander>
         </Grid>

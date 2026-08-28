@@ -30,3 +30,4 @@ C:\Users\17736\AppData\Local\Temp\opencode\gdt-launcher-x64\GrimDawnTeleporter.d
 C:\Users\17736\AppData\Local\Temp\opencode\gdt-launcher-x64\GrimDawnTeleporter.runtimeconfig.json
 C:\Users\17736\AppData\Local\Temp\opencode\gdt-launcher-x64\GrimDawnTeleporter.dll
 C:\Users\17736\AppData\Local\Temp\opencode\gdt-launcher-x64\GrimDawnTeleporter.pdb
+H:\github\grim dawn\src\GrimDawnTeleporter\obj\x64\Release\net8.0-windows\win-x64\GrimDawnTeleporter.sourcelink.json

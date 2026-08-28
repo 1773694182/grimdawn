@@ -105,6 +105,83 @@ namespace
         }
     }
 
+    bool ReadMoneyInternal(DWORD64 gGameEngineAddress, DWORD64 getMainPlayerAddress, DWORD64 getCurrentMoneyAddress, unsigned int* money)
+    {
+        using GetMainPlayerFn = void* (__fastcall*)(void*);
+        using GetCurrentMoneyFn = unsigned int(__fastcall*)(void*);
+
+        __try
+        {
+            auto* gameEngine = *reinterpret_cast<void**>(static_cast<uintptr_t>(gGameEngineAddress));
+            if (!gameEngine)
+            {
+                return false;
+            }
+
+            const auto getMainPlayer = reinterpret_cast<GetMainPlayerFn>(static_cast<uintptr_t>(getMainPlayerAddress));
+            const auto getCurrentMoney = reinterpret_cast<GetCurrentMoneyFn>(static_cast<uintptr_t>(getCurrentMoneyAddress));
+            auto* player = getMainPlayer(gameEngine);
+            if (!player)
+            {
+                return false;
+            }
+
+            *money = getCurrentMoney(player);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    bool SetMoneyInternal(DWORD64 gGameEngineAddress, DWORD64 getMainPlayerAddress, DWORD64 getCurrentMoneyAddress, DWORD64 addMoneyAddress, DWORD64 subtractMoneyAddress, unsigned int targetMoney, unsigned int* finalMoney)
+    {
+        using GetMainPlayerFn = void* (__fastcall*)(void*);
+        using GetCurrentMoneyFn = unsigned int(__fastcall*)(void*);
+        using AddMoneyFn = void(__fastcall*)(void*, unsigned int);
+        using SubtractMoneyFn = bool(__fastcall*)(void*, unsigned int, unsigned int);
+
+        __try
+        {
+            auto* gameEngine = *reinterpret_cast<void**>(static_cast<uintptr_t>(gGameEngineAddress));
+            if (!gameEngine)
+            {
+                return false;
+            }
+
+            const auto getMainPlayer = reinterpret_cast<GetMainPlayerFn>(static_cast<uintptr_t>(getMainPlayerAddress));
+            const auto getCurrentMoney = reinterpret_cast<GetCurrentMoneyFn>(static_cast<uintptr_t>(getCurrentMoneyAddress));
+            auto* player = getMainPlayer(gameEngine);
+            if (!player)
+            {
+                return false;
+            }
+
+            const auto currentMoney = getCurrentMoney(player);
+            if (targetMoney > currentMoney)
+            {
+                const auto addMoney = reinterpret_cast<AddMoneyFn>(static_cast<uintptr_t>(addMoneyAddress));
+                addMoney(player, targetMoney - currentMoney);
+            }
+            else if (targetMoney < currentMoney)
+            {
+                const auto subtractMoney = reinterpret_cast<SubtractMoneyFn>(static_cast<uintptr_t>(subtractMoneyAddress));
+                if (!subtractMoney(player, currentMoney - targetMoney, 0))
+                {
+                    return false;
+                }
+            }
+
+            *finalMoney = getCurrentMoney(player);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
     std::wstring GetLogPath()
     {
         wchar_t tempPath[MAX_PATH]{};
@@ -636,7 +713,10 @@ namespace
             { "GetWorldPosition", "?GetWorldPosition@WorldVec3@GAME@@QEBA?AVVec3@2@XZ" },
             { "InitiatePlayerTeleport", "?InitiatePlayerTeleport@GameEngine@GAME@@QEAAXHHHW4TeleportEffect@2@_N@Z" },
             { "CtoS_StartTeleportInbound", "?CtoS_StartTeleportInbound@GameEngine@GAME@@QEAAXAEBHIHHHMMW4TeleportEffect@2@@Z" },
-            { "StoC_StartTeleportInbound", "?StoC_StartTeleportInbound@GameEngine@GAME@@QEAAXIHHHMMW4TeleportEffect@2@@Z" }
+            { "StoC_StartTeleportInbound", "?StoC_StartTeleportInbound@GameEngine@GAME@@QEAAXIHHHMMW4TeleportEffect@2@@Z" },
+            { "GetCurrentMoney", "?GetCurrentMoney@Character@GAME@@QEBA?BIXZ" },
+            { "AddMoney", "?AddMoney@Character@GAME@@QEAAXI@Z" },
+            { "SubtractMoney", "?SubtractMoney@Character@GAME@@QEAA?BII@Z" }
         };
 
         std::ostringstream json;
@@ -702,6 +782,62 @@ namespace
 
         std::ostringstream json;
         json << "{\"type\":\"teleport\",\"x\":" << position.x << ",\"y\":" << position.y << ",\"z\":" << position.z << "}\n";
+        return json.str();
+    }
+
+    std::string TryGetMoney()
+    {
+        const auto gGameEngineAddress = ResolveGameExport("?gGameEngine@GAME@@3PEAVGameEngine@1@EA");
+        const auto getMainPlayerAddress = ResolveGameExport("?GetMainPlayer@GameEngine@GAME@@QEBAPEAVPlayer@2@XZ");
+        const auto getCurrentMoneyAddress = ResolveGameExport("?GetCurrentMoney@Character@GAME@@QEBA?BIXZ");
+        if (!gGameEngineAddress || !getMainPlayerAddress || !getCurrentMoneyAddress)
+        {
+            return "{\"type\":\"error\",\"message\":\"required money symbols not resolved\"}\n";
+        }
+
+        unsigned int money = 0;
+        if (!ReadMoneyInternal(gGameEngineAddress, getMainPlayerAddress, getCurrentMoneyAddress, &money))
+        {
+            return "{\"type\":\"error\",\"message\":\"failed to read money through game api\"}\n";
+        }
+
+        std::ostringstream json;
+        json << "{\"type\":\"money\",\"value\":" << money << "}\n";
+        return json.str();
+    }
+
+    std::string TrySetMoney(const std::string& command)
+    {
+        const auto separator = command.find(':');
+        if (separator == std::string::npos)
+        {
+            return "{\"type\":\"error\",\"message\":\"set_money format is set_money:value\"}\n";
+        }
+
+        unsigned int targetMoney = 0;
+        if (sscanf_s(command.c_str() + separator + 1, "%u", &targetMoney) != 1)
+        {
+            return "{\"type\":\"error\",\"message\":\"invalid money value\"}\n";
+        }
+
+        const auto gGameEngineAddress = ResolveGameExport("?gGameEngine@GAME@@3PEAVGameEngine@1@EA");
+        const auto getMainPlayerAddress = ResolveGameExport("?GetMainPlayer@GameEngine@GAME@@QEBAPEAVPlayer@2@XZ");
+        const auto getCurrentMoneyAddress = ResolveGameExport("?GetCurrentMoney@Character@GAME@@QEBA?BIXZ");
+        const auto addMoneyAddress = ResolveGameExport("?AddMoney@Character@GAME@@QEAAXI@Z");
+        const auto subtractMoneyAddress = ResolveGameExport("?SubtractMoney@Character@GAME@@QEAA?BII@Z");
+        if (!gGameEngineAddress || !getMainPlayerAddress || !getCurrentMoneyAddress || !addMoneyAddress || !subtractMoneyAddress)
+        {
+            return "{\"type\":\"error\",\"message\":\"required money symbols not resolved\"}\n";
+        }
+
+        unsigned int finalMoney = 0;
+        if (!SetMoneyInternal(gGameEngineAddress, getMainPlayerAddress, getCurrentMoneyAddress, addMoneyAddress, subtractMoneyAddress, targetMoney, &finalMoney))
+        {
+            return "{\"type\":\"error\",\"message\":\"failed to set money through game api\"}\n";
+        }
+
+        std::ostringstream json;
+        json << "{\"type\":\"money\",\"value\":" << finalMoney << "}\n";
         return json.str();
     }
 
@@ -815,6 +951,16 @@ namespace
         if (command.find("get_position") != std::string::npos)
         {
             return TryGetPosition();
+        }
+
+        if (command.find("get_money") != std::string::npos)
+        {
+            return TryGetMoney();
+        }
+
+        if (command.rfind("set_money:", 0) == 0)
+        {
+            return TrySetMoney(command);
         }
 
         if (command.find("teleport") != std::string::npos)
