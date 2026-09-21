@@ -33,6 +33,10 @@
                     <TextBlock x:Name="ProcessStatusText" Text="未检测进程" Foreground="{StaticResource MutedBrush}" />
                     <Button Content="检测进程" Margin="14,0,0,0" Style="{StaticResource PrimaryButton}" Click="DetectProcess_Click" />
                     <Button Content="附加插件" Margin="8,0,0,0" Click="AttachPlugin_Click" />
+                    <CheckBox x:Name="AutoAttachPluginCheckBox" Content="启动时自动注入插件" Margin="12,0,0,0"
+                              VerticalAlignment="Center"
+                              Checked="AutoAttachPluginCheckBox_Changed" Unchecked="AutoAttachPluginCheckBox_Changed"
+                              ToolTip="默认关闭。插件与系统 VC 运行库版本不匹配时（常见于虚拟机）注入会导致游戏闪退，确认兼容后再开启。" />
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -410,7 +414,7 @@
         <!-- 状态栏 -->
         <DockPanel Grid.Row="3" Margin="0,10,0,0" LastChildFill="True">
             <TextBlock DockPanel.Dock="Right" Text="仅供本地单人模式使用" Foreground="{StaticResource MutedBrush}" FontSize="11" />
-            <TextBlock x:Name="StatusText" Text="启动后会自动检测 x64 游戏进程并附加插件。" />
+            <TextBlock x:Name="StatusText" Text="兼容模式：启动时不自动注入插件。需要插件功能请点击“附加插件”。" />
         </DockPanel>
     </Grid>
 </Window>

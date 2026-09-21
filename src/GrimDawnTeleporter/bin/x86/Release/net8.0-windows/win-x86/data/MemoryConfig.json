@@ -4,6 +4,8 @@
   "GameExePathX86": "K:\\SteamLibrary\\steamapps\\common\\Grim Dawn\\Grim Dawn.exe",
   "GameExePathX64": "K:\\SteamLibrary\\steamapps\\common\\Grim Dawn\\x64\\Grim Dawn.exe",
   "PreferredArchitecture": "Auto",
+  "AutoAttachPlugin": false,
+  "AllowIncompatiblePlugin": false,
   "CoordinateAddress": {
     "ModuleName": "Grim Dawn.exe",
     "BaseOffset": "0x0",

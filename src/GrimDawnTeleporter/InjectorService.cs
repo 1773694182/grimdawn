@@ -167,7 +167,18 @@ public sealed class InjectorService
         }
 
         var devDebug = Path.Combine(srcDirectory, "GrimDawnTeleporter.Plugin", "bin", "x64", "Debug", "GrimDawnTeleporter.Plugin.dll");
-        return devDebug;
+        if (File.Exists(devDebug))
+        {
+            return devDebug;
+        }
+
+        throw new FileNotFoundException(
+            "找不到插件 DLL，无法注入。已查找以下位置："
+            + Environment.NewLine + local
+            + Environment.NewLine + devRelease
+            + Environment.NewLine + devDebug
+            + Environment.NewLine
+            + "可继续使用“外部内存兼容模式”（传送/读坐标仍可用），或运行 enable-plugin.bat 恢复插件文件。");
     }
 
     private static IntPtr CreateRemoteThreadWithFallback(IntPtr processHandle, IntPtr parameter, List<(string Source, IntPtr Address)> candidates)

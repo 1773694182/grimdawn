@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("GrimDawnTeleporter")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+363e1062a08ea51770d923827f0dbcee3452d128")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a86a39e17dc150a9d71a3e09144ea762a39baeed")]
 [assembly: System.Reflection.AssemblyProductAttribute("GrimDawnTeleporter")]
 [assembly: System.Reflection.AssemblyTitleAttribute("GrimDawnTeleporter")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

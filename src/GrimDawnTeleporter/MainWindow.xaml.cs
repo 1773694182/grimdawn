@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<GroupSummary> _groupSummaries = [];
     private string _selectedGroup = TeleportPoint.UngroupedName;
     private bool _updatingGroupSelection;
+    private bool _updatingAutoAttachToggle;
     private MemoryConfig _memoryConfig = new();
     private TeleportPointStore _store = null!;
     private TeleportService _teleportService = null!;
@@ -87,7 +88,60 @@ public partial class MainWindow : Window
 
         UpdateGodModeToggleUi();
         UpdateOneShotToggleUi();
-        AutoDetectAndAttachPlugin();
+
+        // 兼容性策略：默认不在启动时自动注入插件。注入会把代码写进游戏进程，
+        // 一旦插件与目标机器运行库/环境不兼容（虚拟机、旧版 msvcp140 等），
+        // 游戏会直接闪退。改为默认“外部内存”模式，用户确认后在“附加插件”里手动注入。
+        _updatingAutoAttachToggle = true;
+        try
+        {
+            AutoAttachPluginCheckBox.IsChecked = _memoryConfig.AutoAttachPlugin;
+        }
+        finally
+        {
+            _updatingAutoAttachToggle = false;
+        }
+
+        if (_memoryConfig.AutoAttachPlugin)
+        {
+            AutoDetectAndAttachPlugin();
+        }
+        else
+        {
+            DetectGameProcessWithoutAttach();
+        }
+    }
+
+    private void AutoAttachPluginCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded || _updatingAutoAttachToggle)
+        {
+            return;
+        }
+
+        _memoryConfig.AutoAttachPlugin = AutoAttachPluginCheckBox.IsChecked == true;
+        _configService.SaveMemoryConfig(_memoryConfig);
+        SetStatus(_memoryConfig.AutoAttachPlugin
+            ? "已开启启动时自动注入插件。若游戏因此闪退，请取消勾选后重试。"
+            : "已关闭启动时自动注入插件（兼容模式），传送将走外部内存读取。");
+    }
+
+    private void DetectGameProcessWithoutAttach()
+    {
+        try
+        {
+            var info = _teleportService.GetGameProcess();
+            UpdateProcessBadge($"已连接 {info.DisplayName}", true);
+            var virtualMachineHint = PluginCompatibility.IsLikelyVirtualMachine()
+                ? "当前系统疑似虚拟机，插件兼容风险较高。"
+                : string.Empty;
+            SetStatus($"已检测到进程：{info.DisplayName}。当前为兼容模式（启动时不注入插件），如需插件功能请点击“附加插件”。{virtualMachineHint}");
+        }
+        catch (Exception)
+        {
+            UpdateProcessBadge("未检测进程", false);
+            SetStatus("未检测到游戏进程。启动 x64 游戏后点击“检测进程”，或勾选“启动时自动注入插件”。");
+        }
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
@@ -133,7 +187,7 @@ public partial class MainWindow : Window
         RunSafely(() =>
         {
             var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, "{\"type\":\"get_status\"}");
+            var response = SendPluginCommandSafe(info.Process.Id, "{\"type\":\"get_status\"}");
             SetStatus($"插件响应：{response}");
         });
     }
@@ -208,7 +262,7 @@ public partial class MainWindow : Window
                 }
 
                 var command = $"god_mode:{enable}";
-                var response = _pluginIpcClient.Send(info.Process.Id, command);
+                var response = SendPluginCommandSafe(info.Process.Id, command);
                 EnsurePluginResponseType(response, "god_mode");
                 _godModeEnabled = enable;
                 SetStatus($"无敌模式已{(enable ? "开启" : "关闭")}");
@@ -230,7 +284,7 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("无敌模式状态查询仅支持 x64 游戏进程。");
             }
 
-            var response = _pluginIpcClient.Send(info.Process.Id, "{\"type\":\"get_god_mode\"}");
+            var response = SendPluginCommandSafe(info.Process.Id, "{\"type\":\"get_god_mode\"}");
             using var document = JsonDocument.Parse(response);
             var root = document.RootElement;
             if (!root.TryGetProperty("enabled", out var enabled))
@@ -256,7 +310,7 @@ public partial class MainWindow : Window
             }
 
             var command = string.Format(CultureInfo.InvariantCulture, "kill_monsters:{0}", radius);
-            var response = _pluginIpcClient.Send(info.Process.Id, command, 30000);
+            var response = SendPluginCommandSafe(info.Process.Id, command, 30000);
             using var document = JsonDocument.Parse(response);
             var root = document.RootElement;
             if (!root.TryGetProperty("type", out var type)
@@ -309,7 +363,7 @@ public partial class MainWindow : Window
                 }
 
                 var command = $"one_shot:{enable}";
-                var response = _pluginIpcClient.Send(info.Process.Id, command);
+                var response = SendPluginCommandSafe(info.Process.Id, command);
                 using var document = JsonDocument.Parse(response);
                 if (!document.RootElement.TryGetProperty("enabled", out _))
                 {
@@ -340,7 +394,7 @@ public partial class MainWindow : Window
                 }
                 
                 var command = $"modify_attribute:strength:{strengthValue}";
-                var response = _pluginIpcClient.Send(info.Process.Id, command);
+                var response = SendPluginCommandSafe(info.Process.Id, command);
                 SetStatus($"力量修改命令已发送 (值：{strengthValue})。注意：此功能需要进一步逆向完善。");
             }
             else
@@ -388,18 +442,20 @@ public partial class MainWindow : Window
         {
             var point = GetSelectedPoint();
             var info = _teleportService.GetGameProcess();
-            if (info.IsX64)
+            if (info.IsX64 && IsPluginReady(info.Process.Id))
             {
                 _lastPluginPosition = ReadPluginCoordinate(info.Process.Id);
                 var teleportCommand = string.Format(CultureInfo.InvariantCulture, "teleport:{0},{1},{2}", point.X, point.Y, point.Z);
-                var teleportResponse = _pluginIpcClient.Send(info.Process.Id, teleportCommand);
+                var teleportResponse = SendPluginCommandSafe(info.Process.Id, teleportCommand);
                 EnsurePluginResponseType(teleportResponse, "teleport");
                 SetStatus($"已通过插件传送到：{point.Name} ({point.CoordinateText})。传送前位置已自动备份。");
                 return;
             }
 
             _teleportService.TeleportTo(point);
-            SetStatus($"已传送到：{point.Name} ({point.CoordinateText})。传送前位置已自动备份。");
+            SetStatus(info.IsX64
+                ? $"已通过外部内存传送到：{point.Name} ({point.CoordinateText})（兼容模式，未使用插件）。传送前位置已自动备份。"
+                : $"已传送到：{point.Name} ({point.CoordinateText})。传送前位置已自动备份。");
         });
     }
 
@@ -408,10 +464,10 @@ public partial class MainWindow : Window
         RunSafely(() =>
         {
             var info = _teleportService.GetGameProcess();
-            if (info.IsX64 && _lastPluginPosition is { } lastPluginPosition)
+            if (info.IsX64 && IsPluginReady(info.Process.Id) && _lastPluginPosition is { } lastPluginPosition)
             {
                 var teleportCommand = string.Format(CultureInfo.InvariantCulture, "teleport:{0},{1},{2}", lastPluginPosition.X, lastPluginPosition.Y, lastPluginPosition.Z);
-                var teleportResponse = _pluginIpcClient.Send(info.Process.Id, teleportCommand);
+                var teleportResponse = SendPluginCommandSafe(info.Process.Id, teleportCommand);
                 EnsurePluginResponseType(teleportResponse, "teleport");
                 SetStatus("已通过插件返回上一个位置。");
                 return;
@@ -672,7 +728,7 @@ public partial class MainWindow : Window
     private Coordinate3 ReadCurrentCoordinate()
     {
         var info = _teleportService.GetGameProcess();
-        if (info.IsX64)
+        if (info.IsX64 && IsPluginReady(info.Process.Id))
         {
             var pluginCoordinate = ReadPluginCoordinate(info.Process.Id);
             SetStatus($"已通过插件读取当前位置：{pluginCoordinate}");
@@ -682,7 +738,9 @@ public partial class MainWindow : Window
         var coordinate = _teleportService.ReadCurrentCoordinate();
         _currentCoordinate = coordinate;
         CurrentCoordinateText.Text = coordinate.ToString();
-        SetStatus($"已读取当前位置：{coordinate}");
+        SetStatus(info.IsX64
+            ? $"已通过外部内存读取当前位置：{coordinate}（兼容模式，未使用插件）"
+            : $"已读取当前位置：{coordinate}");
         return coordinate;
     }
 
@@ -724,13 +782,24 @@ public partial class MainWindow : Window
         }
 
         var pluginPath = _injectorService.ResolvePluginPath();
+        var compatibility = PluginCompatibility.Check(pluginPath);
+        if (!compatibility.IsCompatible && !_memoryConfig.AllowIncompatiblePlugin)
+        {
+            throw new InvalidOperationException(
+                compatibility.Message
+                + Environment.NewLine + Environment.NewLine
+                + "如确认要强制注入，可在 data\\MemoryConfig.json 中把 AllowIncompatiblePlugin 设为 true（不建议）。");
+        }
+
         _injectorService.Inject(info.Process, pluginPath);
         if (!IsPluginReady(targetProcessId, 5000))
         {
             throw new InvalidOperationException("插件注入后未响应。请确认游戏已进入主菜单或世界。");
         }
 
-        return $"已注入插件：{pluginPath}";
+        return compatibility.IsCompatible
+            ? $"已注入插件：{pluginPath}"
+            : $"已强制注入插件（兼容性警告）：{compatibility.Message}";
     }
 
     private static GameProcessInfo GetGameProcessById(int processId)
@@ -750,6 +819,19 @@ public partial class MainWindow : Window
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// 发送需要插件的命令。兼容模式下插件可能未注入，这里先做一次快速探测并给出可操作的提示。
+    /// </summary>
+    private string SendPluginCommandSafe(int processId, string command, int timeoutMs = 3000)
+    {
+        if (!IsPluginReady(processId, 400))
+        {
+            throw new InvalidOperationException("插件当前未附加。请先点击“附加插件”，或勾选“启动时自动注入插件”（兼容性较差）。");
+        }
+
+        return _pluginIpcClient.Send(processId, command, timeoutMs);
     }
 
     private Coordinate3 ReadPluginCoordinate(int? processId = null)
@@ -777,7 +859,7 @@ public partial class MainWindow : Window
         }
 
         AttachPluginIfNeeded(info.Process.Id);
-        var response = _pluginIpcClient.Send(info.Process.Id, "get_money");
+        var response = SendPluginCommandSafe(info.Process.Id, "get_money");
         return ParseMoneyResponse(response);
     }
 
@@ -790,7 +872,7 @@ public partial class MainWindow : Window
         }
 
         AttachPluginIfNeeded(info.Process.Id);
-        var response = _pluginIpcClient.Send(info.Process.Id, $"set_money:{targetValue}");
+        var response = SendPluginCommandSafe(info.Process.Id, $"set_money:{targetValue}");
         return ParseMoneyResponse(response);
     }
 
@@ -1061,7 +1143,7 @@ public partial class MainWindow : Window
         RunSafely(() =>
         {
             var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, "list_modules");
+            var response = SendPluginCommandSafe(info.Process.Id, "list_modules");
             OutputTextBox.Text += $"\n[模块列表]\n{response}\n";
             SetStatus($"已获取模块列表：{response}");
         });
@@ -1072,7 +1154,7 @@ public partial class MainWindow : Window
         RunSafely(() =>
         {
             var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, "resolve_core", 15000);
+            var response = SendPluginCommandSafe(info.Process.Id, "resolve_core", 15000);
             OutputTextBox.Text += $"\n[符号诊断]\n{FormatJson(response)}\n";
             SetStatus("符号诊断完成，结果已写入输出日志。");
         });
@@ -1083,7 +1165,7 @@ public partial class MainWindow : Window
         RunSafely(() =>
         {
             var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, "probe_player");
+            var response = SendPluginCommandSafe(info.Process.Id, "probe_player");
             OutputTextBox.Text += $"\n[玩家探测]\n{FormatJson(response)}\n";
             SetStatus("玩家探测完成，结果已写入输出日志。");
         });
@@ -1094,7 +1176,7 @@ public partial class MainWindow : Window
         RunSafely(() =>
         {
             var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, "find_world", 20000);
+            var response = SendPluginCommandSafe(info.Process.Id, "find_world", 20000);
             OutputTextBox.Text += $"\n[定位 World]\n{FormatJson(response)}\n";
             SetStatus("World 定位完成，结果已写入输出日志。");
         });
@@ -1105,7 +1187,7 @@ public partial class MainWindow : Window
         RunSafely(() =>
         {
             var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, "probe_entities:30", 20000);
+            var response = SendPluginCommandSafe(info.Process.Id, "probe_entities:30", 20000);
             OutputTextBox.Text += $"\n[实体探测]\n{FormatJson(response)}\n";
             SetStatus("实体探测完成，结果已写入输出日志。");
         });
@@ -1116,7 +1198,7 @@ public partial class MainWindow : Window
         RunSafely(() =>
         {
             var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, "list_entity_types:100", 30000);
+            var response = SendPluginCommandSafe(info.Process.Id, "list_entity_types:100", 30000);
             OutputTextBox.Text += $"\n[实体类型统计]\n{FormatJson(response)}\n";
             SetStatus("实体类型统计完成，结果已写入输出日志。");
         });
@@ -1127,7 +1209,7 @@ public partial class MainWindow : Window
         RunSafely(() =>
         {
             var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, "kill_monsters:50", 30000);
+            var response = SendPluginCommandSafe(info.Process.Id, "kill_monsters:50", 30000);
             OutputTextBox.Text += $"\n[秒杀]\n{FormatJson(response)}\n";
             SetStatus("秒杀命令已执行，结果已写入输出日志。");
         });
@@ -1163,7 +1245,7 @@ public partial class MainWindow : Window
             }
 
             var info = _teleportService.GetGameProcess();
-            var response = _pluginIpcClient.Send(info.Process.Id, command);
+            var response = SendPluginCommandSafe(info.Process.Id, command);
             OutputTextBox.Text += $"\n[命令：{command}]\n{response}\n";
             SetStatus($"命令执行完成");
             CustomCommandTextBox.Clear();
@@ -1292,6 +1374,21 @@ public partial class MainWindow : Window
                     SetAutoFarmStatus("等待游戏进程启动...");
                     await Task.Delay(2000, token);
                     continue;
+                }
+
+                if (info.IsX64)
+                {
+                    var pluginProcessId = info.Process.Id;
+                    try
+                    {
+                        await Task.Run(() => AttachPluginIfNeeded(pluginProcessId), token);
+                    }
+                    catch (Exception ex)
+                    {
+                        SetAutoFarmStatus($"插件附加失败，5 秒后重试：{ex.Message}");
+                        await Task.Delay(5000, token);
+                        continue;
+                    }
                 }
 
                 var state = await Task.Run(() => QueryGameState(info.Process.Id), token);

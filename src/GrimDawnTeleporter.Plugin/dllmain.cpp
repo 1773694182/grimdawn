@@ -4,6 +4,8 @@
 #include <dbghelp.h>
 
 #include <atomic>
+#include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <mutex>
 #include <optional>
@@ -34,6 +36,45 @@ namespace
     std::atomic<int> g_autoKillLastKilled{ 0 };
     std::atomic<int> g_autoKillLastError{ 0 };
     std::mutex g_entityQueryMutex;
+    SRWLOCK g_logLock = SRWLOCK_INIT;
+
+    // 兼容模式开关：
+    // 1) 在插件 DLL 同目录放置同名 .disabled 文件；
+    // 2) 或设置环境变量 GRIMDAWN_TELEPORTER_DISABLE_PLUGIN=1。
+    // 命中任一条件时插件不启动任何线程，仅保留 DLL 加载，便于排查兼容性问题。
+    bool IsPluginDisabled() noexcept
+    {
+        __try
+        {
+            wchar_t modulePath[MAX_PATH]{};
+            const DWORD length = GetModuleFileNameW(g_module, modulePath, MAX_PATH);
+            if (length > 0 && length < MAX_PATH)
+            {
+                wchar_t markerPath[MAX_PATH + 16]{};
+                if (swprintf_s(markerPath, L"%s.disabled", modulePath) > 0
+                    && GetFileAttributesW(markerPath) != INVALID_FILE_ATTRIBUTES)
+                {
+                    return true;
+                }
+            }
+
+            wchar_t value[8]{};
+            const DWORD envLength = GetEnvironmentVariableW(L"GRIMDAWN_TELEPORTER_DISABLE_PLUGIN", value, 8);
+            if (envLength > 0 && envLength < 8)
+            {
+                const wchar_t flag = value[0];
+                if (flag == L'1' || flag == L't' || flag == L'T' || flag == L'y' || flag == L'Y')
+                {
+                    return true;
+                }
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+
+        return false;
+    }
 
     struct ModuleInfo
     {
@@ -60,6 +101,7 @@ namespace
     std::optional<SectionInfo> GetSectionInfo(const ModuleInfo& module, const char* sectionName);
     std::string ToHex(uintptr_t value);
     void Log(const std::wstring& message);
+    __declspec(noinline) void Log(const wchar_t* message);
 
     bool ReadPositionInternal(DWORD64 gGameEngineAddress, DWORD64 getPlayerManagerClientAddress, DWORD64 getPlayerIdAddress, DWORD64 getPlayerLocationAddress, DWORD64 getWorldPositionAddress, Vec3* position)
     {
@@ -1759,7 +1801,7 @@ namespace
         }
     }
 
-    DWORD WINAPI AutoKillThread(LPVOID)
+    __declspec(noinline) void AutoKillThreadBody()
     {
         while (!g_stop.load())
         {
@@ -1770,6 +1812,21 @@ namespace
             }
 
             Sleep(150);
+        }
+    }
+
+    DWORD WINAPI AutoKillThread(LPVOID)
+    {
+        // 兼容性保护：自动秒杀线程内部的任何结构化异常都只终止该线程，
+        // 不再让异常穿透到游戏进程（异常穿透会导致游戏闪退）。
+        __try
+        {
+            AutoKillThreadBody();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            g_oneShotEnabled.store(false);
+            Log(L"auto kill thread stopped by a structured exception; one-shot disabled");
         }
 
         return 0;
@@ -3771,24 +3828,97 @@ namespace
     std::wstring GetLogPath()
     {
         wchar_t tempPath[MAX_PATH]{};
-        GetTempPathW(MAX_PATH, tempPath);
-        std::wstringstream stream;
-        stream << tempPath << L"GrimDawnTeleporter.Plugin." << GetCurrentProcessId() << L".log";
-        return stream.str();
+        const DWORD length = GetTempPathW(MAX_PATH, tempPath);
+        if (length == 0 || length >= MAX_PATH)
+        {
+            return L"GrimDawnTeleporter.Plugin.log";
+        }
+
+        std::wstring path(tempPath);
+        if (!path.empty() && path.back() != L'\\' && path.back() != L'/')
+        {
+            path.push_back(L'\\');
+        }
+
+        path.append(L"GrimDawnTeleporter.Plugin.");
+        path.append(std::to_wstring(GetCurrentProcessId()));
+        path.append(L".log");
+        return path;
+    }
+
+    // 兼容性说明：
+    // 日志写入刻意只使用 Win32 API（CreateFileW/WriteFile + SRWLOCK），不再使用
+    // std::mutex / std::wofstream。原因是插件用新版 MSVC STL 编译，而部分环境
+    // （虚拟机、精简系统）里的 msvcp140.dll 版本较旧，静态 std::mutex 的内存布局
+    // 与旧运行库不一致，锁定时会读取空指针并触发 0xC0000005 访问冲突，
+    // 由于发生在游戏进程内，会连带游戏一起闪退。
+    void WriteLogLine(const wchar_t* path, const wchar_t* message) noexcept
+    {
+        __try
+        {
+            SYSTEMTIME now{};
+            GetLocalTime(&now);
+
+            wchar_t line[2048]{};
+            _snwprintf_s(
+                line,
+                _TRUNCATE,
+                L"[%02u:%02u:%02u] %s\r\n",
+                static_cast<unsigned>(now.wHour),
+                static_cast<unsigned>(now.wMinute),
+                static_cast<unsigned>(now.wSecond),
+                message);
+
+            char utf8[4096]{};
+            const int utf8Length = WideCharToMultiByte(CP_UTF8, 0, line, -1, utf8, sizeof(utf8) - 1, nullptr, nullptr);
+            if (utf8Length <= 1)
+            {
+                return;
+            }
+
+            const HANDLE file = CreateFileW(
+                path,
+                FILE_APPEND_DATA,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                nullptr,
+                OPEN_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL,
+                nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+            {
+                return;
+            }
+
+            DWORD written = 0;
+            WriteFile(file, utf8, static_cast<DWORD>(utf8Length - 1), &written, nullptr);
+            CloseHandle(file);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            // 日志失败绝不能影响游戏进程。
+        }
     }
 
     void Log(const std::wstring& message)
     {
-        static std::mutex logMutex;
-        std::lock_guard<std::mutex> guard(logMutex);
-
-        std::wofstream log(GetLogPath(), std::ios::app);
-        if (log)
+        // 先复制到栈缓冲区，SEH 保护区内不构造/析构 C++ 对象。
+        wchar_t buffer[1024]{};
+        constexpr size_t capacity = (sizeof(buffer) / sizeof(buffer[0])) - 1;
+        const size_t count = message.size() < capacity ? message.size() : capacity;
+        if (count > 0)
         {
-            SYSTEMTIME now{};
-            GetLocalTime(&now);
-            log << L"[" << now.wHour << L":" << now.wMinute << L":" << now.wSecond << L"] " << message << L"\n";
+            memcpy(buffer, message.data(), count * sizeof(wchar_t));
         }
+
+        const std::wstring path = GetLogPath();
+        AcquireSRWLockExclusive(&g_logLock);
+        WriteLogLine(path.c_str(), buffer);
+        ReleaseSRWLockExclusive(&g_logLock);
+    }
+
+    __declspec(noinline) void Log(const wchar_t* message)
+    {
+        Log(std::wstring(message));
     }
 
     struct SymbolResolver
@@ -4521,7 +4651,12 @@ namespace
     {
         if (command.find("ping") != std::string::npos)
         {
-            return "{\"type\":\"pong\",\"plugin\":\"GrimDawnTeleporter.Plugin\"}\n";
+            return "{\"type\":\"pong\",\"plugin\":\"GrimDawnTeleporter.Plugin\",\"runtime\":\"static-crt\",\"compat\":2}\n";
+        }
+
+        if (command.find("get_compat") != std::string::npos)
+        {
+            return "{\"type\":\"compat\",\"runtime\":\"static-crt\",\"log\":\"win32\",\"sehGuard\":true,\"disabled\":false}\n";
         }
 
         if (command.find("get_status") != std::string::npos)
@@ -4839,7 +4974,7 @@ namespace
         Log(L"pipe server stopped");
     }
 
-    DWORD WINAPI WorkerThread(LPVOID)
+    __declspec(noinline) void WorkerThreadBody()
     {
         Log(L"plugin loaded");
         const auto engine = ResolveGameExport("?gGameEngine@GAME@@3PEAVGameEngine@1@EA");
@@ -4854,7 +4989,24 @@ namespace
             Log(L"gGameEngine export not resolved");
         }
         RunPipeServer();
+    }
+
+    DWORD WINAPI WorkerThread(LPVOID)
+    {
+        // 兼容性保护：插件工作线程内的结构化异常只终止该线程并标记停止，
+        // 不向上穿透到游戏进程，避免“注入插件后游戏闪退”。
+        __try
+        {
+            WorkerThreadBody();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            g_stop.store(true);
+            Log(L"worker thread stopped by a structured exception; plugin disabled");
+        }
+
         FreeLibraryAndExitThread(g_module, 0);
+        return 0;
     }
 }
 
@@ -4864,6 +5016,12 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
     {
         g_module = module;
         DisableThreadLibraryCalls(module);
+
+        if (IsPluginDisabled())
+        {
+            return TRUE;
+        }
+
         g_worker = CreateThread(nullptr, 0, WorkerThread, nullptr, 0, nullptr);
         CreateThread(nullptr, 0, AutoKillThread, nullptr, 0, nullptr);
     }

@@ -128,23 +128,66 @@ data\MemoryConfig.json
 
 如果游戏是你手动从 Steam 或文件管理器启动的，工具不会在关闭时结束它。
 
+## 兼容性（虚拟机 / 旧版 VC 运行库）
+
+虚拟机或未更新运行库的系统中，旧版插件会因为 `std::mutex` 与系统 `msvcp140.dll` 版本不匹配而在注入后触发 `0xC0000005`，导致**游戏闪退**。
+
+当前版本已做如下处理：
+
+- 插件改为**静态链接 CRT（/MT）**，不再依赖系统 `msvcp140.dll`；
+- 插件的日志与线程入口改为纯 Win32 + SEH 保护，插件内部异常不再影响游戏进程；
+- 工具**默认不自动注入插件**，并在注入前做运行库兼容性检查，不兼容时直接拒绝注入并说明原因；
+- x64 未注入插件时，传送会自动改用外部内存指针链（兼容模式）。
+
+详细分析与验证步骤见 [docs/vm-compatibility.md](docs/vm-compatibility.md)。
+
+如果暂时无法重新编译插件，可以运行 `disable-plugin.bat` 禁用注入（恢复用 `enable-plugin.bat`）。
+
 ## 构建
 
+### 环境要求
+
+| 目标 | 需要 |
+| --- | --- |
+| 完整构建（插件 + 启动器） | Visual Studio 2022（含“使用 C++ 的桌面开发”工作负载）+ .NET 8 SDK |
+| 只构建启动器（`-SkipPlugin`） | .NET 8 SDK |
+
+一键安装（Windows 11，管理员 PowerShell）：
+
 ```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e `
+  --accept-package-agreements --accept-source-agreements `
+  --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --add Microsoft.VisualStudio.Workload.ManagedDesktop --includeRecommended"
+```
+
+只装 .NET 8 SDK：
+
+```powershell
+winget install --id Microsoft.DotNet.SDK.8 -e --accept-package-agreements --accept-source-agreements
+```
+
+### 常用命令
+
+```powershell
+# 完整构建 + 发布自包含分发包
 ./build-release.ps1
-```
 
-如需构建 Debug 版本：
+# 只重建启动器（不编译 C++ 插件，不需要 Visual Studio）
+./build-release.ps1 -SkipPlugin
 
-```powershell
+# Debug 版本
 ./build-release.ps1 -Configuration Debug
-```
 
-如果只想要快速构建、不生成分发包，可以加 `-SkipPublish`：
-
-```powershell
+# 只构建、不生成分发包
 ./build-release.ps1 -SkipPublish
+
+# 手动指定 MSBuild 路径
+./build-release.ps1 -MsBuildPath "E:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
 ```
+
+也可以直接双击 `build-release.bat`（完整构建）或 `build-launcher.bat`（只重建启动器），参数会原样透传。
+
+脚本会自动查找 MSBuild（vswhere → 注册表 → 常见路径）与 `dotnet`，缺少工具时给出安装命令提示。完整构建还会校验插件是否仍动态依赖 `MSVCP140.dll` / `VCRUNTIME140.dll`：是则直接失败并提示改用静态运行库（见 `docs/vm-compatibility.md`）。
 
 脚本会依次重新生成 x64 插件 DLL、x86 工具 EXE、x64 工具 EXE，把 `GrimDawnTeleporter.Plugin.dll` 复制到 x64 工具输出目录，最后发布一份自包含 x64 分发包。
 
