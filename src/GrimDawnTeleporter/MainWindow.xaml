@@ -2,177 +2,415 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Grim Dawn 坐标传送工具"
-        Width="1120"
-        Height="720"
-        MinWidth="920"
-        MinHeight="560"
+        Width="1180"
+        Height="780"
+        MinWidth="1000"
+        MinHeight="640"
+        Background="{StaticResource BgBrush}"
+        Foreground="{StaticResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Microsoft YaHei, Segoe UI"
+        TextOptions.TextFormattingMode="Display"
         Loaded="Window_Loaded"
         Closing="Window_Closing">
-    <Grid Margin="16">
+    <Grid Margin="14">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Padding="14" CornerRadius="10" Background="#18202A">
+        <!-- 顶部栏 -->
+        <Border Grid.Row="0" Style="{StaticResource CardBorder}" Padding="16,12">
             <DockPanel LastChildFill="True">
-                <StackPanel>
-                    <TextBlock Text="Grim Dawn 坐标传送工具" FontSize="20" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock x:Name="StatusText" Margin="0,6,0,0" Foreground="#C8D2DF" Text="启动后会自动检测 x64 游戏进程并附加插件。F6 记录当前位置，F7 传送到选中点。" />
+                <StackPanel DockPanel.Dock="Left">
+                    <TextBlock Text="Grim Dawn 坐标传送工具" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Style="{StaticResource MutedText}" FontSize="11" Margin="0,3,0,0"
+                               Text="F6 记录位置 · F7 传送 · F8 无敌模式 · F9 一击必杀 | 仅本地单人模式使用" />
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse x:Name="ProcessStatusDot" Width="10" Height="10" Fill="{StaticResource MutedBrush}" Margin="0,0,8,0" />
+                    <TextBlock x:Name="ProcessStatusText" Text="未检测进程" Foreground="{StaticResource MutedBrush}" />
+                    <Button Content="检测进程" Margin="14,0,0,0" Style="{StaticResource PrimaryButton}" Click="DetectProcess_Click" />
+                    <Button Content="附加插件" Margin="8,0,0,0" Click="AttachPlugin_Click" />
                 </StackPanel>
             </DockPanel>
         </Border>
 
-        <Grid Grid.Row="1" Margin="0,14,0,14">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2*" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <GroupBox Header="当前位置" Padding="12">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="X/Y/Z：" VerticalAlignment="Center" />
-                    <TextBlock x:Name="CurrentCoordinateText" Text="尚未读取" FontWeight="SemiBold" VerticalAlignment="Center" />
-                    <Button Content="记录当前位置" Margin="18,0,0,0" Padding="14,7" Click="AddCurrentPoint_Click" />
-                    <Button Content="返回上一个位置" Margin="8,0,0,0" Padding="14,7" Click="ReturnLastPosition_Click" />
-                </StackPanel>
-            </GroupBox>
-            <GroupBox Grid.Column="1" Header="搜索" Padding="12" Margin="12,0,0,0">
-                <TextBox x:Name="SearchBox" VerticalContentAlignment="Center" TextChanged="SearchBox_TextChanged" />
-            </GroupBox>
-        </Grid>
+        <!-- 功能选项卡 -->
+        <TabControl Grid.Row="1" Margin="0,12,0,0">
 
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="280" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
+            <!-- 传送点管理 -->
+            <TabItem Header="传送点管理">
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="14">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
-            <GroupBox Header="分组" Padding="12">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
+                        <!-- 当前位置 -->
+                        <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="8" Padding="14,10">
+                            <DockPanel LastChildFill="True">
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button Content="记录当前位置 (F6)" Style="{StaticResource PrimaryButton}" Click="AddCurrentPoint_Click" />
+                                    <Button Content="返回上一个位置" Margin="8,0,0,0" Click="ReturnLastPosition_Click" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="当前位置：" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBlock x:Name="CurrentCoordinateText" Text="尚未读取" FontWeight="SemiBold" Margin="4,0,0,0" />
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
 
-                    <StackPanel Grid.Row="0">
-                        <TextBlock Text="新建分组" Foreground="#667085" />
-                        <DockPanel Margin="0,6,0,0">
-                            <Button DockPanel.Dock="Right" Content="新建" Margin="8,0,0,0" Padding="12,6" Click="CreateGroup_Click" />
-                            <TextBox x:Name="NewGroupBox" VerticalContentAlignment="Center" />
-                        </DockPanel>
-                    </StackPanel>
+                        <!-- 分组 + 列表 -->
+                        <Grid Grid.Row="1" Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="270" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Row="1" Margin="0,12,0,0">
-                        <TextBlock Text="模糊查询分组" Foreground="#667085" />
-                        <TextBox x:Name="GroupSearchBox" Margin="0,6,0,0" VerticalContentAlignment="Center" TextChanged="GroupSearchBox_TextChanged" ToolTip="输入关键字可模糊筛选分组列表和下拉选择" />
-                        <Button Content="删除选中分组" Margin="0,8,0,0" Padding="12,6" Click="DeleteGroup_Click" />
-                    </StackPanel>
+                            <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="8" Padding="12">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
 
-                    <ListBox Grid.Row="2" x:Name="GroupListBox" Margin="0,14,0,0" SelectionChanged="GroupListBox_SelectionChanged">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <DockPanel Margin="2,4">
-                                    <TextBlock Text="{Binding PointCount}" DockPanel.Dock="Right" Foreground="#667085" />
-                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                    <TextBlock Text="分组" Style="{StaticResource CardTitle}" />
+                                    <TextBox x:Name="GroupSearchBox" Grid.Row="1" Margin="0,10,0,0"
+                                             TextChanged="GroupSearchBox_TextChanged"
+                                             ToolTip="输入关键字可模糊筛选分组列表和下拉选择" />
+                                    <DockPanel Grid.Row="2" Margin="0,8,0,0">
+                                        <Button DockPanel.Dock="Right" Content="新建" Margin="8,0,0,0" Click="CreateGroup_Click" />
+                                        <TextBox x:Name="NewGroupBox" ToolTip="输入新分组名称" />
+                                    </DockPanel>
+                                    <ListBox x:Name="GroupListBox" Grid.Row="3" Margin="0,10,0,0"
+                                             SelectionChanged="GroupListBox_SelectionChanged">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel Margin="2,2">
+                                                    <Border DockPanel.Dock="Right" Background="{StaticResource SurfaceBrush}"
+                                                            CornerRadius="9" Padding="7,1" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding PointCount}" FontSize="11" Foreground="{StaticResource MutedBrush}" />
+                                                    </Border>
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <Button Grid.Row="4" Content="删除选中分组" Margin="0,10,0,0"
+                                            Style="{StaticResource DangerButton}" Click="DeleteGroup_Click" />
+                                </Grid>
+                            </Border>
+
+                            <Grid Grid.Column="1" Margin="12,0,0,0">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <DockPanel LastChildFill="True">
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                        <ComboBox x:Name="GroupComboBox" Width="160" IsEditable="True" IsTextSearchEnabled="False"
+                                                  ToolTip="选择或输入目标分组" />
+                                        <Button Content="移动选中坐标" Margin="8,0,0,0" Click="AssignSelectedToGroup_Click" />
+                                        <Button Content="移出分组" Margin="8,0,0,0" Click="RemoveSelectedFromGroup_Click" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="SelectedGroupTitle" Text="当前分组：未分组" FontWeight="SemiBold" />
+                                        <TextBox x:Name="SearchBox" Width="220" Margin="18,0,0,0"
+                                                 TextChanged="SearchBox_TextChanged" ToolTip="搜索名称、分组、区域或备注" />
+                                    </StackPanel>
                                 </DockPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </Grid>
-            </GroupBox>
 
-            <Grid Grid.Column="1" Margin="12,0,0,0">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
+                                <DataGrid Grid.Row="1" x:Name="PointsGrid" Margin="0,10,0,0"
+                                          IsReadOnly="False"
+                                          CellEditEnding="PointsGrid_CellEditEnding">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="2*" />
+                                        <DataGridTextColumn Header="分组" Binding="{Binding Group}" Width="*" />
+                                        <DataGridTextColumn Header="X" Binding="{Binding X, StringFormat=0.###}" Width="*" />
+                                        <DataGridTextColumn Header="Y" Binding="{Binding Y, StringFormat=0.###}" Width="*" />
+                                        <DataGridTextColumn Header="Z" Binding="{Binding Z, StringFormat=0.###}" Width="*" />
+                                        <DataGridTextColumn Header="区域" Binding="{Binding Area}" Width="*" />
+                                        <DataGridTextColumn Header="备注" Binding="{Binding Note}" Width="1.6*" />
+                                        <DataGridTextColumn Header="创建时间" Binding="{Binding CreatedAt, StringFormat=yyyy-MM-dd HH:mm:ss}" Width="1.7*" IsReadOnly="True" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </Grid>
 
-                <GroupBox Header="当前分组" Padding="12" Margin="0,0,0,12">
-                    <DockPanel LastChildFill="True">
-                        <TextBlock x:Name="SelectedGroupTitle" Text="当前分组：未分组" FontWeight="SemiBold" VerticalAlignment="Center" />
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                            <ComboBox x:Name="GroupComboBox" Width="180" VerticalContentAlignment="Center" IsEditable="True" IsTextSearchEnabled="False" />
-                            <Button Content="移动选中坐标" Margin="8,0,0,0" Padding="12,6" Click="AssignSelectedToGroup_Click" />
-                            <Button Content="移出分组" Margin="8,0,0,0" Padding="12,6" Click="RemoveSelectedFromGroup_Click" />
+                        <!-- 底部操作 -->
+                        <DockPanel Grid.Row="2" Margin="0,12,0,0" LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Content="导入 GI 列表" Click="ImportGi_Click" />
+                                <Button Content="导出 GI 列表" Margin="8,0,0,0" Click="ExportGi_Click" />
+                                <Button Content="打开数据目录" Margin="8,0,0,0" Click="OpenDataDirectory_Click" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="传送到选中点 (F7)" Style="{StaticResource PrimaryButton}" Click="TeleportSelected_Click" />
+                                <Button Content="删除选中点" Margin="8,0,0,0" Style="{StaticResource DangerButton}" Click="DeleteSelected_Click" />
+                                <Button Content="保存列表" Margin="8,0,0,0" Click="SavePoints_Click" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Grid>
+                </Border>
+            </TabItem>
+
+            <!-- 作弊工具 -->
+            <TabItem Header="作弊工具">
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="14">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <!-- 无敌模式 -->
+                            <Border Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="True">
+                                        <ToggleButton x:Name="GodModeToggleBtn" DockPanel.Dock="Right"
+                                                      Content="已关闭" Style="{StaticResource SwitchButton}"
+                                                      Click="GodModeToggle_Click" ToolTip="切换无敌模式 (F8)" />
+                                        <StackPanel>
+                                            <TextBlock Text="无敌模式" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource HintText}" Margin="0,3,0,0" Text="角色不受任何伤害（x64 插件）" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <Button Content="查询当前状态" Margin="0,12,0,0" HorizontalAlignment="Left" Click="GodModeStatus_Click" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 一击必杀 -->
+                            <Border Grid.Column="1" Margin="12,0,0,0" Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="True">
+                                        <ToggleButton x:Name="OneShotToggleBtn" DockPanel.Dock="Right"
+                                                      Content="已关闭" Style="{StaticResource SwitchButton}"
+                                                      Click="OneShotToggle_Click" ToolTip="切换一击必杀 (F9)" />
+                                        <StackPanel>
+                                            <TextBlock Text="一击必杀" Style="{StaticResource CardTitle}" />
+                                            <TextBlock Style="{StaticResource HintText}" Margin="0,3,0,0" Text="开启后自动秒杀近身 12 单位内的怪物 (F9)" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <TextBlock Style="{StaticResource HintText}" Margin="0,12,0,0"
+                                               Text="实现方式：后台每 150ms 对近身怪物施加致死伤害，等效一击必杀。" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 秒杀怪物 -->
+                            <Border Grid.Row="1" Margin="0,12,0,0" Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Text="秒杀怪物" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Style="{StaticResource HintText}" Margin="0,3,0,0" Text="立即杀死玩家周围指定半径内的怪物（仅 Monster，不误伤 NPC）" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                        <TextBlock Text="半径" Foreground="{StaticResource MutedBrush}" />
+                                        <TextBox x:Name="InstaKillRadiusBox" Width="80" Margin="8,0,0,0" Text="50" ToolTip="秒杀半径（游戏单位）" />
+                                        <Button Content="执行秒杀" Margin="8,0,0,0" Style="{StaticResource DangerButton}" Click="InstaKill_Click" />
+                                    </StackPanel>
+                                    <TextBlock Style="{StaticResource HintText}" Margin="0,10,0,0"
+                                               Text="对 Monster 类实体施加致死伤害，已实机验证。" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 属性修改 -->
+                            <Border Grid.Row="1" Grid.Column="1" Margin="12,12,0,0" Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Text="修改力量" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Style="{StaticResource HintText}" Margin="0,3,0,0" Text="设置角色力量属性（占位实现）" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                        <TextBlock Text="力量值" Foreground="{StaticResource MutedBrush}" />
+                                        <TextBox x:Name="StrengthTextBox" Width="100" Margin="8,0,0,0" ToolTip="输入力量值" />
+                                        <Button Content="应用修改" Margin="8,0,0,0" Click="ModifyStrength_Click" />
+                                    </StackPanel>
+                                    <TextBlock Style="{StaticResource HintText}" Margin="0,10,0,0"
+                                               Foreground="{StaticResource WarningBrush}"
+                                               Text="需要先逆向 Character 属性偏移。" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 货币 -->
+                            <Border Grid.Row="2" Grid.ColumnSpan="2" Margin="0,12,0,0" Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Text="货币读取与设置" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Style="{StaticResource HintText}" Margin="0,3,0,0" Text="通过游戏 API 读取或设置铁币数量" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                        <TextBlock Text="当前货币" Foreground="{StaticResource MutedBrush}" />
+                                        <TextBox x:Name="CurrencyCurrentBox" Width="130" Margin="8,0,0,0" IsReadOnly="True" ToolTip="通过游戏 API 读取的当前货币数量" />
+                                        <TextBlock Text="目标货币" Foreground="{StaticResource MutedBrush}" Margin="18,0,0,0" />
+                                        <TextBox x:Name="CurrencyTargetBox" Width="130" Margin="8,0,0,0" ToolTip="输入要写入的目标货币数量" />
+                                        <Button Content="读取" Margin="8,0,0,0" Click="CurrencyApiRead_Click" />
+                                        <Button Content="设置" Margin="8,0,0,0" Style="{StaticResource SuccessButton}" Click="CurrencyApiSet_Click" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 自动挂机 -->
+                            <Border Grid.Row="3" Grid.ColumnSpan="2" Margin="0,12,0,0" Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Text="自动挂机循环" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Style="{StaticResource HintText}" Margin="0,3,0,0"
+                                               Text="循环流程：开始游戏 → 传送到目标点 → 秒杀周围怪物 → 拾取物品 → 退出到主菜单。按 F10 停止。" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                        <TextBlock Text="目标传送点" Foreground="{StaticResource MutedBrush}" />
+                                        <ComboBox x:Name="AutoFarmTargetComboBox" Width="180" Margin="8,0,0,0"
+                                                  ToolTip="选择一个传送点作为挂机目标位置" />
+                                        <TextBlock Text="杀怪半径" Foreground="{StaticResource MutedBrush}" Margin="14,0,0,0" />
+                                        <TextBox x:Name="AutoFarmKillRadiusBox" Width="60" Margin="8,0,0,0" Text="50" ToolTip="秒杀半径（游戏单位）" />
+                                        <Button x:Name="AutoFarmStartButton" Content="开始挂机" Margin="14,0,0,0"
+                                                Style="{StaticResource SuccessButton}" Click="AutoFarmStart_Click" />
+                                        <Button x:Name="AutoFarmStopButton" Content="停止 (F10)" Margin="8,0,0,0"
+                                                Style="{StaticResource DangerButton}" Click="AutoFarmStop_Click" IsEnabled="False" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <TextBlock Text="拾取词条" Foreground="{StaticResource MutedBrush}" />
+                                        <TextBox x:Name="AutoFarmLootKeywordsBox" Width="380" Margin="8,0,0,0"
+                                                 ToolTip="多个词条用英文逗号分隔（如：暴怒,敏锐,雷击）。留空则拾取全部物品。" />
+                                        <TextBlock Text="单轮时限" Foreground="{StaticResource MutedBrush}" Margin="18,0,0,0" />
+                                        <TextBox x:Name="AutoFarmMaxMinutesBox" Width="50" Margin="8,0,0,0" Text="3"
+                                                 ToolTip="单轮最长刷怪时间（分钟），超时后强制退出主菜单刷新地图" />
+                                        <TextBlock Text="分钟" Foreground="{StaticResource MutedBrush}" Margin="6,0,0,0" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="AutoFarmStatusText" Style="{StaticResource MutedText}" Margin="0,10,0,0" Text="未运行" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </ScrollViewer>
+                </Border>
+            </TabItem>
+
+            <!-- 设置与调试 -->
+            <TabItem Header="设置与调试">
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="14">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+
+                            <!-- 游戏启动 -->
+                            <Border Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Text="游戏启动" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Style="{StaticResource HintText}" Margin="0,3,0,0"
+                                               Text="按 data\MemoryConfig.json 中配置的路径启动游戏；由本工具启动的游戏会在关闭工具时一并结束。" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button Content="启动 x86 游戏" Click="LaunchX86_Click" />
+                                        <Button Content="启动 x64 游戏" Margin="8,0,0,0" Style="{StaticResource PrimaryButton}" Click="LaunchX64_Click" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 插件与诊断 -->
+                            <Border Margin="0,12,0,0" Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Text="插件与诊断" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Style="{StaticResource HintText}" Margin="0,3,0,0"
+                                               Text="用于确认插件通信状态和游戏内符号解析情况。" />
+                                    <WrapPanel Margin="0,12,0,0">
+                                        <Button Content="插件状态" Margin="0,0,8,8" Click="PluginStatus_Click" />
+                                        <Button Content="符号诊断" Margin="0,0,8,8" Style="{StaticResource PrimaryButton}" Click="RunSymbolDiagnostic_Click" ToolTip="解析全部核心游戏符号并输出地址" />
+                                        <Button Content="玩家探测" Margin="0,0,8,8" Click="ProbePlayer_Click" ToolTip="读取 gGameEngine、玩家指针和质心坐标" />
+                                        <Button Content="定位 World" Margin="0,0,8,8" Click="FindWorld_Click" ToolTip="通过 vtable 特征扫描定位 World 实例" />
+                                        <Button Content="实体探测" Margin="0,0,8,8" Click="ProbeEntities_Click" ToolTip="查询玩家周围实体列表（秒杀功能前置）" />
+                                        <Button Content="实体类型" Margin="0,0,8,8" Click="ListEntityTypes_Click" ToolTip="统计周围实体类型分布" />
+                                        <Button Content="秒杀测试" Margin="0,0,8,8" Style="{StaticResource DangerButton}" Click="KillMonsters_Click" ToolTip="对周围 50 单位内的怪物施加致死伤害" />
+                                        <Button Content="列出模块" Margin="0,0,8,8" Click="ListModules_Click" />
+                                        <Button Content="扩展命令" Margin="0,0,8,8" Click="ExpandCommands_Click" />
+                                    </WrapPanel>
+                                    <Expander x:Name="AdvancedCommandsExpander" Header="扩展测试命令" IsExpanded="False">
+                                        <StackPanel Margin="0,6,0,0">
+                                            <DockPanel LastChildFill="True">
+                                                <Button DockPanel.Dock="Right" Content="发送命令" Margin="8,0,0,0" Click="SendCustomCommand_Click" />
+                                                <TextBox x:Name="CustomCommandTextBox" ToolTip="输入自定义插件命令" />
+                                            </DockPanel>
+                                            <TextBlock Text="常用命令：" Style="{StaticResource MutedText}" FontSize="11" Margin="0,10,0,4" />
+                                            <ListBox x:Name="AvailableCommandsListBox" Height="130" FontFamily="Consolas" FontSize="11">
+                                                <ListBoxItem>resolve_core - 解析核心符号地址</ListBoxItem>
+                                                <ListBoxItem>probe_player - 探测玩家指针与质心坐标</ListBoxItem>
+                                                <ListBoxItem>diagnose_symbols - 诊断字符串引用</ListBoxItem>
+                                                <ListBoxItem>get_position - 获取玩家位置</ListBoxItem>
+                                                <ListBoxItem>get_money - 获取当前货币</ListBoxItem>
+                                                <ListBoxItem>list_modules - 列出所有模块</ListBoxItem>
+                                            </ListBox>
+                                        </StackPanel>
+                                    </Expander>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 热键说明 -->
+                            <Border Margin="0,12,0,0" Style="{StaticResource CardBorder}">
+                                <StackPanel>
+                                    <TextBlock Text="全局快捷键" Style="{StaticResource CardTitle}" />
+                                    <UniformGrid Margin="0,12,0,0" Columns="4">
+                                        <StackPanel>
+                                            <TextBlock Text="F6" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
+                                            <TextBlock Text="记录当前位置" Style="{StaticResource MutedText}" FontSize="11" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="F7" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
+                                            <TextBlock Text="传送到选中点" Style="{StaticResource MutedText}" FontSize="11" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="F8" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
+                                            <TextBlock Text="切换无敌模式" Style="{StaticResource MutedText}" FontSize="11" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="F9" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
+                                            <TextBlock Text="切换一击必杀" Style="{StaticResource MutedText}" FontSize="11" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                    <TextBlock Style="{StaticResource HintText}" Margin="0,12,0,0"
+                                               Foreground="{StaticResource WarningBrush}"
+                                               Text="作弊类功能为占位实现，需要完成游戏内符号逆向后才可实际生效。" />
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
-                    </DockPanel>
-                </GroupBox>
+                    </ScrollViewer>
+                </Border>
+            </TabItem>
+        </TabControl>
 
-                <DataGrid Grid.Row="1"
-                          x:Name="PointsGrid"
-                          AutoGenerateColumns="False"
-                          CanUserAddRows="False"
-                          IsReadOnly="False"
-                          SelectionMode="Single"
-                          SelectionUnit="FullRow"
-                          HeadersVisibility="Column"
-                          GridLinesVisibility="Horizontal"
-                          CellEditEnding="PointsGrid_CellEditEnding">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="2*" />
-                        <DataGridTextColumn Header="分组" Binding="{Binding Group}" Width="*" />
-                        <DataGridTextColumn Header="X" Binding="{Binding X, StringFormat=0.###}" Width="*" />
-                        <DataGridTextColumn Header="Y" Binding="{Binding Y, StringFormat=0.###}" Width="*" />
-                        <DataGridTextColumn Header="Z" Binding="{Binding Z, StringFormat=0.###}" Width="*" />
-                        <DataGridTextColumn Header="区域" Binding="{Binding Area}" Width="*" />
-                        <DataGridTextColumn Header="备注" Binding="{Binding Note}" Width="2*" />
-                        <DataGridTextColumn Header="创建时间" Binding="{Binding CreatedAt, StringFormat=yyyy-MM-dd HH:mm:ss}" Width="1.7*" IsReadOnly="True" />
-                    </DataGrid.Columns>
-                </DataGrid>
-            </Grid>
-        </Grid>
-
-        <Grid Grid.Row="3" Margin="0,12,0,0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-
-            <GroupBox Header="输出" Padding="8">
-                <Grid>
+        <!-- 输出日志 -->
+        <Border Grid.Row="2" Margin="0,12,0,0" Style="{StaticResource CardBorder}" Padding="14,8">
+            <Expander Header="输出日志" IsExpanded="False">
+                <Grid Margin="0,6,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBox x:Name="OutputTextBox"
-                             MinHeight="58"
-                             MaxHeight="110"
-                             TextWrapping="Wrap"
+                             MinHeight="80"
+                             MaxHeight="320"
+                             TextWrapping="NoWrap"
                              AcceptsReturn="True"
                              IsReadOnly="True"
-                             VerticalScrollBarVisibility="Auto" />
-                    <Button Grid.Column="1" Content="复制输出" Margin="8,0,0,0" Padding="16,8" Click="CopyOutput_Click" />
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Auto"
+                             FontFamily="Consolas"
+                             FontSize="11" />
+                    <Button Grid.Column="1" Content="复制输出" Margin="8,0,0,0" VerticalAlignment="Top" Click="CopyOutput_Click" />
                 </Grid>
-            </GroupBox>
-
-            <Expander Grid.Row="1" Header="高级/调试" Margin="0,8,0,0" IsExpanded="False">
-                <WrapPanel Margin="0,8,0,0">
-                    <Button Content="检测进程" Margin="6,4,0,0" Padding="14,8" Click="DetectProcess_Click" />
-                    <Button Content="附加插件" Margin="6,4,0,0" Padding="14,8" Click="AttachPlugin_Click" />
-                    <Button Content="插件状态" Margin="6,4,0,0" Padding="14,8" Click="PluginStatus_Click" />
-                    <TextBox x:Name="CurrencyCurrentBox" Width="110" Margin="18,4,0,0" VerticalContentAlignment="Center" IsReadOnly="True" ToolTip="通过游戏 API 读取的当前货币数量" />
-                    <TextBox x:Name="CurrencyTargetBox" Width="110" Margin="18,4,0,0" VerticalContentAlignment="Center" ToolTip="输入要写入的目标货币数量" />
-                    <Button Content="读取货币(API)" Margin="6,4,0,0" Padding="14,8" Click="CurrencyApiRead_Click" />
-                    <Button Content="设置货币(API)" Margin="6,4,0,0" Padding="14,8" Click="CurrencyApiSet_Click" />
-                </WrapPanel>
             </Expander>
-        </Grid>
+        </Border>
 
-        <DockPanel Grid.Row="4" Margin="0,14,0,0">
-            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
-                <Button Content="传送到选中点" Padding="16,8" Click="TeleportSelected_Click" />
-                <Button Content="删除选中点" Margin="8,0,0,0" Padding="16,8" Click="DeleteSelected_Click" />
-                <Button Content="保存列表" Margin="8,0,0,0" Padding="16,8" Click="SavePoints_Click" />
-            </StackPanel>
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                <Button Content="导入 GI 列表" Padding="16,8" Click="ImportGi_Click" />
-                <Button Content="导出 GI 列表" Margin="8,0,0,0" Padding="16,8" Click="ExportGi_Click" />
-                <Button Content="打开数据目录" Margin="8,0,0,0" Padding="16,8" Click="OpenDataDirectory_Click" />
-            </StackPanel>
+        <!-- 状态栏 -->
+        <DockPanel Grid.Row="3" Margin="0,10,0,0" LastChildFill="True">
+            <TextBlock DockPanel.Dock="Right" Text="仅供本地单人模式使用" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+            <TextBlock x:Name="StatusText" Text="启动后会自动检测 x64 游戏进程并附加插件。" />
         </DockPanel>
     </Grid>
 </Window>

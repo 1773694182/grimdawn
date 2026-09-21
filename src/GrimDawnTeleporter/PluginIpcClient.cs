@@ -15,8 +15,16 @@ public sealed class PluginIpcClient
         pipe.Write(request, 0, request.Length);
         pipe.Flush();
 
-        var buffer = new byte[4096];
-        var read = pipe.Read(buffer, 0, buffer.Length);
-        return Encoding.UTF8.GetString(buffer, 0, read).Trim();
+        var buffer = new byte[65536];
+        var readTask = Task.Run(() => pipe.Read(buffer, 0, buffer.Length));
+        if (!readTask.Wait(Math.Max(timeoutMs, 5000)))
+        {
+            throw new TimeoutException($"插件未在预期时间内响应命令：{command}");
+        }
+
+        var read = readTask.Result;
+        return read > 0
+            ? Encoding.UTF8.GetString(buffer, 0, read).Trim()
+            : string.Empty;
     }
 }

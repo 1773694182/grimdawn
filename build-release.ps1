@@ -1,6 +1,7 @@
-param(
+﻿param(
     [ValidateSet('Debug', 'Release')]
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [switch]$SkipPublish
 )
 
 $ErrorActionPreference = 'Stop'
@@ -92,3 +93,38 @@ $x64PluginDll = Join-Path $x64Output 'GrimDawnTeleporter.Plugin.dll'
 "x86 EXE: $x86Exe"
 "x64 EXE: $x64Exe"
 "x64 plugin DLL: $x64PluginDll"
+
+if ($SkipPublish) {
+    "Publish skipped."
+    return
+}
+
+"Publishing self-contained x64 package..."
+$publishDir = Join-Path $root "dist\GrimDawnTeleporter-x64"
+if (Test-Path -LiteralPath $publishDir) {
+    Remove-Item -LiteralPath $publishDir -Recurse -Force
+}
+
+Invoke-NativeCommand { dotnet publish $appProjectPath -c $Configuration -p:Platform=x64 -p:SelfContained=true -p:PublishSingleFile=false -p:DebugType=none --nologo -o $publishDir }
+
+Copy-Item -LiteralPath $pluginDll -Destination $publishDir -Force
+
+$readmePath = Join-Path $publishDir '使用说明.txt'
+$readmeContent = @'
+GrimDawnTeleporter x64 自包含版本
+
+1. 本目录包含完整 .NET 运行时，目标机器无需安装 .NET。
+2. 请整体复制或移动本目录，不要只复制 GrimDawnTeleporter.exe。
+3. 双击 GrimDawnTeleporter.exe 运行，程序会请求管理员权限（注入插件需要）。
+4. 首次使用请检查 data\MemoryConfig.json 中的游戏路径配置。
+5. 插件仅支持 x64 游戏进程，请以 x64 模式启动 Grim Dawn。
+6. 通过工具“设置与调试”页启动的游戏，会在关闭工具时一并结束。
+
+数据文件位于 data\ 目录：
+  MemoryConfig.json   游戏路径与坐标指针链配置
+  TeleportPoints.json 传送点列表（运行时生成）
+'@
+[System.IO.File]::WriteAllText($readmePath, $readmeContent, [System.Text.UTF8Encoding]::new($false))
+
+"Publish completed: $publishDir"
+"Publish EXE: $(Join-Path $publishDir 'GrimDawnTeleporter.exe')"

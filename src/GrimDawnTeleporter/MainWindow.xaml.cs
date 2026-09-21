@@ -2,8 +2,10 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using GrimDawnTeleporter.Models;
 using Microsoft.Win32;
 
@@ -13,6 +15,9 @@ public partial class MainWindow : Window
 {
     private const uint VkF6 = 0x75;
     private const uint VkF7 = 0x76;
+    private const uint VkF8 = 0x77;
+    private const uint VkF9 = 0x78;
+    private const uint VkF10 = 0x79;
     private readonly ConfigService _configService = new();
     private readonly GameProcessService _processService = new();
     private readonly InjectorService _injectorService = new();
@@ -32,6 +37,10 @@ public partial class MainWindow : Window
     private HotkeyService? _hotkeyService;
     private Coordinate3? _currentCoordinate;
     private Coordinate3? _lastPluginPosition;
+    private bool _godModeEnabled;
+    private bool _oneShotEnabled;
+    private CancellationTokenSource? _autoFarmCts;
+    private Task? _autoFarmTask;
 
     public MainWindow()
     {
@@ -69,13 +78,22 @@ public partial class MainWindow : Window
         _hotkeyService = new HotkeyService(this);
         _hotkeyService.Register(1, VkF6, () => AddCurrentPoint_Click(this, new RoutedEventArgs()));
         _hotkeyService.Register(2, VkF7, () => TeleportSelected_Click(this, new RoutedEventArgs()));
+        _hotkeyService.Register(3, VkF8, ToggleGodModeFromHotkey);
+        _hotkeyService.Register(4, VkF9, ToggleOneShotFromHotkey);
+        _hotkeyService.Register(5, VkF10, StopAutoFarm);
 
+        AutoFarmTargetComboBox.ItemsSource = _points;
+        AutoFarmTargetComboBox.DisplayMemberPath = nameof(TeleportPoint.Name);
+
+        UpdateGodModeToggleUi();
+        UpdateOneShotToggleUi();
         AutoDetectAndAttachPlugin();
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
         SavePoints();
+        _autoFarmCts?.Cancel();
         _hotkeyService?.Dispose();
         _processService.CloseStartedProcesses();
     }
@@ -85,6 +103,7 @@ public partial class MainWindow : Window
         RunSafely(() =>
         {
             var info = _teleportService.GetGameProcess();
+            UpdateProcessBadge($"已连接 {info.DisplayName}", true);
             if (_teleportService.TryRestoreSessionAddress())
             {
                 SetStatus($"已检测到进程：{info.DisplayName}。已恢复本次游戏进程的动态坐标地址。");
@@ -103,6 +122,8 @@ public partial class MainWindow : Window
         RunSafely(() =>
         {
             var message = AttachPluginIfNeeded();
+            var info = _teleportService.GetGameProcess();
+            UpdateProcessBadge($"已连接 {info.DisplayName}", true);
             SetStatus(message);
         });
     }
@@ -159,6 +180,206 @@ public partial class MainWindow : Window
             CurrencyCurrentBox.Text = value.ToString(CultureInfo.InvariantCulture);
             SetStatus($"已通过游戏 API 设置货币：{value}");
         });
+    }
+    
+    private void ToggleGodModeFromHotkey()
+    {
+        GodModeToggleBtn.IsChecked = GodModeToggleBtn.IsChecked != true;
+        GodModeToggle_Click(this, new RoutedEventArgs());
+    }
+
+    private void UpdateGodModeToggleUi()
+    {
+        GodModeToggleBtn.IsChecked = _godModeEnabled;
+        GodModeToggleBtn.Content = _godModeEnabled ? "已开启" : "已关闭";
+    }
+
+    private void GodModeToggle_Click(object sender, RoutedEventArgs e)
+    {
+        var enable = GodModeToggleBtn.IsChecked == true;
+        RunSafely(() =>
+        {
+            try
+            {
+                var info = _teleportService.GetGameProcess();
+                if (!info.IsX64)
+                {
+                    throw new InvalidOperationException("x86 版本暂不支持作弊功能，请使用 x64 版本。");
+                }
+
+                var command = $"god_mode:{enable}";
+                var response = _pluginIpcClient.Send(info.Process.Id, command);
+                EnsurePluginResponseType(response, "god_mode");
+                _godModeEnabled = enable;
+                SetStatus($"无敌模式已{(enable ? "开启" : "关闭")}");
+            }
+            finally
+            {
+                UpdateGodModeToggleUi();
+            }
+        });
+    }
+
+    private void GodModeStatus_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var info = _teleportService.GetGameProcess();
+            if (!info.IsX64)
+            {
+                throw new InvalidOperationException("无敌模式状态查询仅支持 x64 游戏进程。");
+            }
+
+            var response = _pluginIpcClient.Send(info.Process.Id, "{\"type\":\"get_god_mode\"}");
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("enabled", out var enabled))
+            {
+                throw new InvalidOperationException($"无法获取无敌模式状态：{response}");
+            }
+
+            _godModeEnabled = enabled.GetBoolean();
+            UpdateGodModeToggleUi();
+            SetStatus($"无敌模式状态：{(_godModeEnabled ? "已启用" : "未启用")}");
+        });
+    }
+    
+    private void InstaKill_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var radius = ParseInstaKillRadius();
+            var info = _teleportService.GetGameProcess();
+            if (!info.IsX64)
+            {
+                throw new InvalidOperationException("秒杀怪物仅支持 x64 游戏进程。");
+            }
+
+            var command = string.Format(CultureInfo.InvariantCulture, "kill_monsters:{0}", radius);
+            var response = _pluginIpcClient.Send(info.Process.Id, command, 30000);
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("type", out var type)
+                || !string.Equals(type.GetString(), "kill_monsters", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"插件未返回 kill_monsters：{response}");
+            }
+
+            var killed = root.TryGetProperty("killed", out var killedProperty) ? killedProperty.GetInt32() : 0;
+            SetStatus($"秒杀完成：半径 {radius} 内击杀 {killed} 个怪物。");
+        });
+    }
+
+    private float ParseInstaKillRadius()
+    {
+        var text = InstaKillRadiusBox.Text.Trim();
+        if (float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var radius)
+            && radius > 0
+            && radius <= 500)
+        {
+            return radius;
+        }
+
+        throw new InvalidOperationException("请输入 0 到 500 之间的秒杀半径。");
+    }
+
+    private void ToggleOneShotFromHotkey()
+    {
+        OneShotToggleBtn.IsChecked = OneShotToggleBtn.IsChecked != true;
+        OneShotToggle_Click(this, new RoutedEventArgs());
+    }
+
+    private void UpdateOneShotToggleUi()
+    {
+        OneShotToggleBtn.IsChecked = _oneShotEnabled;
+        OneShotToggleBtn.Content = _oneShotEnabled ? "已开启" : "已关闭";
+    }
+
+    private void OneShotToggle_Click(object sender, RoutedEventArgs e)
+    {
+        var enable = OneShotToggleBtn.IsChecked == true;
+        RunSafely(() =>
+        {
+            try
+            {
+                var info = _teleportService.GetGameProcess();
+                if (!info.IsX64)
+                {
+                    throw new InvalidOperationException("一击必杀仅支持 x64 游戏进程。");
+                }
+
+                var command = $"one_shot:{enable}";
+                var response = _pluginIpcClient.Send(info.Process.Id, command);
+                using var document = JsonDocument.Parse(response);
+                if (!document.RootElement.TryGetProperty("enabled", out _))
+                {
+                    throw new InvalidOperationException($"插件未确认一击必杀状态：{response}");
+                }
+
+                _oneShotEnabled = enable;
+                SetStatus($"一击必杀已{(enable ? "开启" : "关闭")}（占位实现，需完成伤害 Hook 后才会实际生效）。");
+            }
+            finally
+            {
+                UpdateOneShotToggleUi();
+            }
+        });
+    }
+    
+    private void ModifyStrength_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var info = _teleportService.GetGameProcess();
+            if (info.IsX64)
+            {
+                var strengthValue = 100; // 默认值
+                if (int.TryParse(StrengthTextBox.Text, out var parsed))
+                {
+                    strengthValue = parsed;
+                }
+                
+                var command = $"modify_attribute:strength:{strengthValue}";
+                var response = _pluginIpcClient.Send(info.Process.Id, command);
+                SetStatus($"力量修改命令已发送 (值：{strengthValue})。注意：此功能需要进一步逆向完善。");
+            }
+            else
+            {
+                MessageBox.Show(this, "x86 版本暂不支持属性修改功能。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        });
+    }
+
+    private void LaunchX86_Click(object sender, RoutedEventArgs e)
+    {
+        LaunchGame(useX64: false);
+    }
+
+    private void LaunchX64_Click(object sender, RoutedEventArgs e)
+    {
+        LaunchGame(useX64: true);
+    }
+
+    private void LaunchGame(bool useX64)
+    {
+        RunSafely(() =>
+        {
+            var exePath = useX64 ? _memoryConfig.GameExePathX64 : _memoryConfig.GameExePathX86;
+            if (string.IsNullOrWhiteSpace(exePath))
+            {
+                throw new InvalidOperationException("尚未配置游戏路径，请检查 data\\MemoryConfig.json。");
+            }
+
+            var process = _processService.StartGame(exePath);
+            SetStatus($"已启动{(useX64 ? " x64" : " x86")} 游戏进程（PID {process.Id}）。进入游戏后点击“检测进程”。");
+        });
+    }
+
+    private void UpdateProcessBadge(string text, bool connected)
+    {
+        ProcessStatusText.Text = text;
+        ProcessStatusText.Foreground = (System.Windows.Media.Brush)FindResource(connected ? "SuccessBrush" : "MutedBrush");
+        ProcessStatusDot.Fill = (System.Windows.Media.Brush)FindResource(connected ? "SuccessBrush" : "WarningBrush");
     }
 
     private void TeleportSelected_Click(object sender, RoutedEventArgs e)
@@ -420,12 +641,32 @@ public partial class MainWindow : Window
 
     private void CopyOutput_Click(object sender, RoutedEventArgs e)
     {
-        var text = OutputTextBox.Text;
-        if (!string.IsNullOrWhiteSpace(text))
+        try
         {
-            Clipboard.SetText(text);
-            SetStatus("已复制输出内容到剪贴板。");
+            if (OutputTextBox is not null && !string.IsNullOrEmpty(OutputTextBox.Text))
+            {
+                // 确保选中整个文本内容
+                OutputTextBox.Select(0, OutputTextBox.Text.Length);
+                
+                // 复制选中的文本
+                Clipboard.SetText(OutputTextBox.SelectedText);
+                SetStatus($"已复制 {OutputTextBox.Text.Length} 个字符到剪贴板。");
+            }
+            else
+            {
+                MessageBox.Show(this, "输出框为空，没有可复制的内容", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
         }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"复制失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void OutputTextBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        // SelectionChanged 事件处理器（占位实现）
+        // 如果需要跟踪选择变化，可以在这里添加逻辑
     }
 
     private Coordinate3 ReadCurrentCoordinate()
@@ -452,15 +693,18 @@ public partial class MainWindow : Window
             var info = _teleportService.GetGameProcess();
             if (info.IsX86)
             {
+                UpdateProcessBadge($"已检测 x86 进程 {info.DisplayName}", false);
                 SetStatus($"已检测到 x86 游戏进程：{info.DisplayName}。插件仅用于 x64，当前保留旧传送模式。");
                 return;
             }
 
             var message = AttachPluginIfNeeded(info.Process.Id);
+            UpdateProcessBadge($"已连接 {info.DisplayName}", true);
             SetStatus($"已检测到进程：{info.DisplayName}。{message}");
         }
         catch (Exception ex)
         {
+            UpdateProcessBadge("未检测进程", false);
             SetStatus($"未自动附加插件：{ex.Message}");
         }
     }
@@ -810,5 +1054,846 @@ public partial class MainWindow : Window
             OutputTextBox.Text = message;
             OutputTextBox.CaretIndex = OutputTextBox.Text.Length;
         }
+    }
+
+    private void ListModules_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var info = _teleportService.GetGameProcess();
+            var response = _pluginIpcClient.Send(info.Process.Id, "list_modules");
+            OutputTextBox.Text += $"\n[模块列表]\n{response}\n";
+            SetStatus($"已获取模块列表：{response}");
+        });
+    }
+
+    private void RunSymbolDiagnostic_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var info = _teleportService.GetGameProcess();
+            var response = _pluginIpcClient.Send(info.Process.Id, "resolve_core", 15000);
+            OutputTextBox.Text += $"\n[符号诊断]\n{FormatJson(response)}\n";
+            SetStatus("符号诊断完成，结果已写入输出日志。");
+        });
+    }
+
+    private void ProbePlayer_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var info = _teleportService.GetGameProcess();
+            var response = _pluginIpcClient.Send(info.Process.Id, "probe_player");
+            OutputTextBox.Text += $"\n[玩家探测]\n{FormatJson(response)}\n";
+            SetStatus("玩家探测完成，结果已写入输出日志。");
+        });
+    }
+
+    private void FindWorld_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var info = _teleportService.GetGameProcess();
+            var response = _pluginIpcClient.Send(info.Process.Id, "find_world", 20000);
+            OutputTextBox.Text += $"\n[定位 World]\n{FormatJson(response)}\n";
+            SetStatus("World 定位完成，结果已写入输出日志。");
+        });
+    }
+
+    private void ProbeEntities_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var info = _teleportService.GetGameProcess();
+            var response = _pluginIpcClient.Send(info.Process.Id, "probe_entities:30", 20000);
+            OutputTextBox.Text += $"\n[实体探测]\n{FormatJson(response)}\n";
+            SetStatus("实体探测完成，结果已写入输出日志。");
+        });
+    }
+
+    private void ListEntityTypes_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var info = _teleportService.GetGameProcess();
+            var response = _pluginIpcClient.Send(info.Process.Id, "list_entity_types:100", 30000);
+            OutputTextBox.Text += $"\n[实体类型统计]\n{FormatJson(response)}\n";
+            SetStatus("实体类型统计完成，结果已写入输出日志。");
+        });
+    }
+
+    private void KillMonsters_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var info = _teleportService.GetGameProcess();
+            var response = _pluginIpcClient.Send(info.Process.Id, "kill_monsters:50", 30000);
+            OutputTextBox.Text += $"\n[秒杀]\n{FormatJson(response)}\n";
+            SetStatus("秒杀命令已执行，结果已写入输出日志。");
+        });
+    }
+
+    private static string FormatJson(string text)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            return JsonSerializer.Serialize(document.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (JsonException)
+        {
+            return text;
+        }
+    }
+
+    private void ExpandCommands_Click(object sender, RoutedEventArgs e)
+    {
+        AdvancedCommandsExpander.IsExpanded = !AdvancedCommandsExpander.IsExpanded;
+    }
+
+    private void SendCustomCommand_Click(object sender, RoutedEventArgs e)
+    {
+        RunSafely(() =>
+        {
+            var command = CustomCommandTextBox.Text.Trim();
+            if (string.IsNullOrEmpty(command))
+            {
+                MessageBox.Show(this, "请输入命令", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var info = _teleportService.GetGameProcess();
+            var response = _pluginIpcClient.Send(info.Process.Id, command);
+            OutputTextBox.Text += $"\n[命令：{command}]\n{response}\n";
+            SetStatus($"命令执行完成");
+            CustomCommandTextBox.Clear();
+        });
+    }
+
+    private const uint MouseEventLeftDown = 0x0002;
+    private const uint MouseEventLeftUp = 0x0004;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetClientRect(IntPtr hWnd, out NativeRect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool ClientToScreen(IntPtr hWnd, ref NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int cmd);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int width, int height, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+
+    private readonly record struct GameStateResult(bool InGame, bool Loading);
+
+    private void AutoFarmStart_Click(object sender, RoutedEventArgs e)
+    {
+        if (_autoFarmTask is { IsCompleted: false })
+        {
+            SetStatus("自动挂机已在运行。");
+            return;
+        }
+
+        if (AutoFarmTargetComboBox.SelectedItem is not TeleportPoint target)
+        {
+            MessageBox.Show(this, "请先选择目标传送点。", "自动挂机", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (!float.TryParse(AutoFarmKillRadiusBox.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var killRadius)
+            || killRadius <= 0
+            || killRadius > 500)
+        {
+            MessageBox.Show(this, "请输入 0 到 500 之间的杀怪半径。", "自动挂机", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (!int.TryParse(AutoFarmMaxMinutesBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxMinutes)
+            || maxMinutes <= 0
+            || maxMinutes > 120)
+        {
+            MessageBox.Show(this, "请输入 1 到 120 之间的单轮时限（分钟）。", "自动挂机", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _autoFarmCts = new CancellationTokenSource();
+        SetAutoFarmUi(running: true);
+        SetAutoFarmStatus($"挂机启动，目标：{target.Name}");
+        _autoFarmTask = RunAutoFarmAsync(target, killRadius, AutoFarmLootKeywordsBox.Text.Trim(), maxMinutes, _autoFarmCts.Token);
+    }
+
+    private void AutoFarmStop_Click(object sender, RoutedEventArgs e)
+    {
+        StopAutoFarm();
+    }
+
+    private void StopAutoFarm()
+    {
+        if (_autoFarmCts is null)
+        {
+            return;
+        }
+
+        _autoFarmCts.Cancel();
+        SetAutoFarmStatus("正在停止...");
+    }
+
+    private void SetAutoFarmUi(bool running)
+    {
+        AutoFarmStartButton.IsEnabled = !running;
+        AutoFarmStopButton.IsEnabled = running;
+    }
+
+    private void SetAutoFarmStatus(string text)
+    {
+        AutoFarmStatusText.Text = text;
+        SetStatus(text);
+    }
+
+    private async Task RunAutoFarmAsync(TeleportPoint target, float killRadius, string lootKeywords, int maxMinutes, CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                SetAutoFarmStatus("检测游戏进程...");
+                var info = TryGetGameProcess();
+                if (info is null)
+                {
+                    SetAutoFarmStatus("等待游戏进程启动...");
+                    await Task.Delay(2000, token);
+                    continue;
+                }
+
+                var state = await Task.Run(() => QueryGameState(info.Process.Id), token);
+                if (!state.InGame)
+                {
+                    if (!await TryEnterWorldAsync(info.Process, token))
+                    {
+                        SetAutoFarmStatus("进入游戏超时，重试...");
+                        continue;
+                    }
+                }
+
+                await Task.Run(() => SendPluginCommand(info.Process.Id, "reset_cache"), token);
+                await Task.Delay(300, token);
+
+                SetAutoFarmStatus("开启无敌模式...");
+                await Task.Run(() => SendPluginCommand(info.Process.Id, "god_mode:true"), token);
+                _godModeEnabled = true;
+                UpdateGodModeToggleUi();
+
+                SetAutoFarmStatus("等待游戏稳定（3 秒）...");
+                await Task.Delay(3000, token);
+
+                SetAutoFarmStatus("检测附近是否有实体（NPC/怪物/物体）...");
+                var entitiesDetected = await WaitForEntitiesAsync(info.Process.Id, killRadius, TimeSpan.FromSeconds(60), token);
+                SetAutoFarmStatus(entitiesDetected ? "检测到附近有实体，开始传送..." : "附近长时间无实体，仍执行传送");
+
+                SetAutoFarmStatus($"传送到 {target.Name} ...");
+                await Task.Run(() => SendPluginCommand(info.Process.Id, string.Format(
+                    CultureInfo.InvariantCulture, "teleport:{0},{1},{2}", target.X, target.Y, target.Z)), token);
+                var arrived = await WaitForPositionAsync(info.Process.Id, target, TimeSpan.FromSeconds(30), token);
+                SetAutoFarmStatus(arrived ? "已到达目标点" : "传送等待超时，继续执行");
+                await Task.Delay(800, token);
+
+                SetAutoFarmStatus($"监控怪物（每秒检测+秒杀，半径 {killRadius}）...");
+                var quietSeconds = 0;
+                var lootAcquired = false;
+                var ineffectiveStrikes = 0;
+                var lastKilled = -1;
+                var lastMonsterFound = -1;
+                var farmDeadline = DateTime.UtcNow.AddMinutes(maxMinutes);
+                while (!token.IsCancellationRequested && quietSeconds < 10)
+                {
+                    if (DateTime.UtcNow >= farmDeadline)
+                    {
+                        SetAutoFarmStatus($"刷怪 {maxMinutes} 分钟未获得目标物品，强制刷新地图...");
+                        break;
+                    }
+
+                    var killCommand = string.Format(CultureInfo.InvariantCulture, "kill_monsters:{0}", killRadius);
+                    var killResponse = await Task.Run(() => SendPluginCommandAndGetResponse(info.Process.Id, killCommand), token);
+                    var (monsterFound, killedCount) = ParseKillResult(killResponse);
+
+                    if (killedCount > 0 && killedCount == lastKilled && monsterFound == lastMonsterFound)
+                    {
+                        ineffectiveStrikes++;
+                        if (ineffectiveStrikes >= 5)
+                        {
+                            SetAutoFarmStatus("怪物持续无法被击杀（训练假人/免疫怪），返回主菜单...");
+                            await Task.Delay(500, token);
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        ineffectiveStrikes = 0;
+                    }
+
+                    lastKilled = killedCount;
+                    lastMonsterFound = monsterFound;
+
+                    if (killedCount > 0)
+                    {
+                        quietSeconds = 0;
+                        SetAutoFarmStatus($"击杀 {killedCount} 个怪物，等待掉落后拾取...");
+                        await Task.Delay(1200, token);
+                    }
+
+                    var breakResponse = await Task.Run(() => SendPluginCommandAndGetResponse(info.Process.Id, string.Format(CultureInfo.InvariantCulture, "break_containers:{0}", killRadius)), token);
+                    var brokenContainers = ParseBreakContainersResult(breakResponse);
+                    if (brokenContainers > 0)
+                    {
+                        SetAutoFarmStatus($"打碎 {brokenContainers} 个战利品容器，等待掉落后拾取...");
+                        await Task.Delay(1200, token);
+                    }
+
+                    var chestResponse = await Task.Run(() => SendPluginCommandAndGetResponse(info.Process.Id, "open_chest"), token);
+                    var openedChests = ParseChestOpenResult(chestResponse);
+                    if (openedChests > 0)
+                    {
+                        SetAutoFarmStatus($"开启 {openedChests} 个宝箱，等待掉落后拾取...");
+                        await Task.Delay(1500, token);
+                    }
+
+                    var lootResponse = await Task.Run(() => SendPluginCommandAndGetResponse(info.Process.Id, BuildLootCommand(lootKeywords)), token);
+                    var (lootFound, lootMatched, lootedCount) = ParseLootResult(lootResponse);
+                    await Task.Delay(600, token);
+
+                    if (lootedCount > 0)
+                    {
+                        lootAcquired = true;
+                        SetAutoFarmStatus($"已拾取 {lootedCount} 件目标物品，等待状态稳定...");
+                        await Task.Delay(3000, token);
+                        break;
+                    }
+
+                    if (killedCount == 0 && monsterFound == 0 && lootMatched == 0)
+                    {
+                        SetAutoFarmStatus("附近无怪物且无匹配物品，返回主菜单进入下一轮...");
+                        await Task.Delay(1000, token);
+                        break;
+                    }
+
+                    quietSeconds++;
+                    SetAutoFarmStatus(killedCount > 0
+                        ? $"击杀 {killedCount} 个怪物，继续刷怪（{quietSeconds}/10）..."
+                        : monsterFound > 0
+                            ? $"检测到 {monsterFound} 个怪物但未击杀（{quietSeconds}/10）..."
+                            : $"等待怪物刷新（{quietSeconds}/10）...");
+
+                    await Task.Delay(1000, token);
+                }
+
+                if (!lootAcquired)
+                {
+                    SetAutoFarmStatus("退出前最后拾取...");
+                    await Task.Run(() => SendPluginCommand(info.Process.Id, BuildLootCommand(lootKeywords)), token);
+                    await Task.Delay(1000, token);
+                }
+
+                SetAutoFarmStatus("退出到主菜单（模拟菜单操作）...");
+                await Task.Run(() => SendPluginCommand(info.Process.Id, "one_shot:false"), token);
+                await Task.Delay(2000, token);
+                var menuExited = await ExitToMainMenuViaUiAsync(info.Process, token);
+                if (!menuExited)
+                {
+                    SetAutoFarmStatus("菜单退出未确认，等待状态变化...");
+                    await WaitForMainMenuAsync(info.Process.Id, TimeSpan.FromSeconds(20), token);
+                }
+                SetAutoFarmStatus("一轮完成");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            SetAutoFarmStatus($"挂机异常停止：{ex.Message}");
+        }
+        finally
+        {
+            if (_godModeEnabled)
+            {
+                var processInfo = TryGetGameProcess();
+                if (processInfo is not null)
+                {
+                    SendPluginCommand(processInfo.Process.Id, "god_mode:false");
+                }
+
+                _godModeEnabled = false;
+                UpdateGodModeToggleUi();
+            }
+
+            _autoFarmCts?.Dispose();
+            _autoFarmCts = null;
+            SetAutoFarmUi(running: false);
+            SetAutoFarmStatus("自动挂机已停止");
+        }
+    }
+
+    private GameStateResult QueryGameState(int processId)
+    {
+        try
+        {
+            var response = _pluginIpcClient.Send(processId, "is_in_game");
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("inGame", out var inGame))
+            {
+                return new GameStateResult(false, true);
+            }
+
+            var loading = root.TryGetProperty("loading", out var loadingProperty) && loadingProperty.GetBoolean();
+            return new GameStateResult(inGame.GetBoolean(), loading);
+        }
+        catch
+        {
+            return new GameStateResult(false, true);
+        }
+    }
+
+    private async Task<bool> WaitForInGameAsync(int processId, TimeSpan timeout, CancellationToken token)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var state = await Task.Run(() => QueryGameState(processId), token);
+            if (state.InGame)
+            {
+                return true;
+            }
+
+            await Task.Delay(1000, token);
+        }
+
+        return false;
+    }
+
+    private async Task<bool> WaitForMainMenuAsync(int processId, TimeSpan timeout, CancellationToken token)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var state = await Task.Run(() => QueryGameState(processId), token);
+            if (!state.InGame)
+            {
+                return true;
+            }
+
+            await Task.Delay(1000, token);
+        }
+
+        return false;
+    }
+
+    private async Task<bool> WaitForPositionAsync(int processId, TeleportPoint target, TimeSpan timeout, CancellationToken token)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var position = await Task.Run(() => TryQueryPosition(processId), token);
+            if (position is { } value)
+            {
+                var dx = value.X - target.X;
+                var dy = value.Y - target.Y;
+                var dz = value.Z - target.Z;
+                if (dx * dx + dy * dy + dz * dz < 25.0)
+                {
+                    return true;
+                }
+            }
+
+            await Task.Delay(500, token);
+        }
+
+        return false;
+    }
+
+    private Coordinate3? TryQueryPosition(int processId)
+    {
+        try
+        {
+            var response = _pluginIpcClient.Send(processId, "get_position");
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (root.TryGetProperty("type", out var type)
+                && string.Equals(type.GetString(), "position", StringComparison.OrdinalIgnoreCase))
+            {
+                return new Coordinate3(
+                    root.GetProperty("x").GetSingle(),
+                    root.GetProperty("y").GetSingle(),
+                    root.GetProperty("z").GetSingle());
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static string BuildLootCommand(string lootKeywords)
+    {
+        return string.IsNullOrWhiteSpace(lootKeywords)
+            ? "loot_items:60"
+            : string.Format(CultureInfo.InvariantCulture, "loot_items:60:{0}", lootKeywords.Trim());
+    }
+
+    private async Task<bool> WaitForEntitiesAsync(int processId, float radius, TimeSpan timeout, CancellationToken token)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var scan = await Task.Run(() => TryScanEntities(processId, radius), token);
+            if (scan is { Total: > 0 })
+            {
+                return true;
+            }
+
+            await Task.Delay(1000, token);
+        }
+
+        return false;
+    }
+
+    private readonly record struct EntityScanResult(int Total, int MonsterCount);
+
+    private EntityScanResult? TryScanEntities(int processId, float radius)
+    {
+        try
+        {
+            var response = _pluginIpcClient.Send(processId, string.Format(
+                CultureInfo.InvariantCulture, "list_entity_types:{0}", radius), 30000);
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            var total = root.TryGetProperty("total", out var totalProperty) ? totalProperty.GetInt32() : 0;
+            var monsters = root.TryGetProperty("monsterCount", out var monsterProperty) ? monsterProperty.GetInt32() : 0;
+            return new EntityScanResult(total, monsters);
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private int? TryGetMonsterCount(int processId, float radius)
+    {
+        var scan = TryScanEntities(processId, radius);
+        return scan?.MonsterCount;
+    }
+
+    private void SendPluginCommand(int processId, string command)
+    {
+        try
+        {
+            _pluginIpcClient.Send(processId, command);
+        }
+        catch
+        {
+        }
+    }
+
+    private string? SendPluginCommandAndGetResponse(int processId, string command)
+    {
+        try
+        {
+            return _pluginIpcClient.Send(processId, command, 30000);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static (int Found, int Matched, int Looted) ParseLootResult(string? response)
+    {
+        if (string.IsNullOrEmpty(response))
+        {
+            return (0, 0, 0);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            var found = root.TryGetProperty("found", out var foundProperty) ? foundProperty.GetInt32() : 0;
+            var matched = root.TryGetProperty("matched", out var matchedProperty) ? matchedProperty.GetInt32() : 0;
+            var looted = root.TryGetProperty("looted", out var lootedProperty) ? lootedProperty.GetInt32() : 0;
+            return (found, matched, looted);
+        }
+        catch (JsonException)
+        {
+        }
+
+        return (0, 0, 0);
+    }
+
+    private static int ParseChestOpenResult(string? response)
+    {
+        if (string.IsNullOrEmpty(response))
+        {
+            return 0;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            return root.TryGetProperty("called", out var calledProperty) ? calledProperty.GetInt32() : 0;
+        }
+        catch (JsonException)
+        {
+        }
+
+        return 0;
+    }
+
+    private static int ParseBreakContainersResult(string? response)
+    {
+        if (string.IsNullOrEmpty(response))
+        {
+            return 0;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            return root.TryGetProperty("broken", out var brokenProperty) ? brokenProperty.GetInt32() : 0;
+        }
+        catch (JsonException)
+        {
+        }
+
+        return 0;
+    }
+
+    private static (int Found, int Killed) ParseKillResult(string? response)
+    {
+        if (string.IsNullOrEmpty(response))
+        {
+            return (0, 0);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            var found = root.TryGetProperty("found", out var foundProperty) ? foundProperty.GetInt32() : 0;
+            var killed = root.TryGetProperty("killed", out var killedProperty) ? killedProperty.GetInt32() : 0;
+            return (found, killed);
+        }
+        catch (JsonException)
+        {
+        }
+
+        return (0, 0);
+    }
+
+    private GameProcessInfo? TryGetGameProcess()
+    {
+        try
+        {
+            return _teleportService.GetGameProcess();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<bool> TryEnterWorldAsync(Process process, CancellationToken token)
+    {
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var state = await Task.Run(() => QueryGameState(process.Id), token);
+            if (state.InGame)
+            {
+                return true;
+            }
+
+            SetAutoFarmStatus($"进入游戏... 步骤 {attempt + 1}/10");
+            await Task.Run(() => NudgeGameToEnterWorld(process, attempt), token);
+            await Task.Delay(2500, token);
+        }
+
+        return false;
+    }
+
+    private static void NudgeGameToEnterWorld(Process process, int attempt)
+    {
+        try
+        {
+            process.Refresh();
+            var hwnd = process.MainWindowHandle;
+            if (hwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            ShowWindow(hwnd, 9);
+            ShowWindow(hwnd, 5);
+            SetForegroundWindow(hwnd);
+            Thread.Sleep(400);
+
+            switch (attempt % 6)
+            {
+                case 0:
+                    ClickClientPoint(hwnd, 0.50, 0.94);
+                    break;
+                case 1:
+                    PressEnterKey();
+                    break;
+                case 2:
+                    ClickClientPoint(hwnd, 0.15, 0.45);
+                    break;
+                case 3:
+                    ClickClientPoint(hwnd, 0.50, 0.94);
+                    break;
+                case 4:
+                    PressEnterKey();
+                    break;
+                case 5:
+                    ClickClientPoint(hwnd, 0.50, 0.45);
+                    break;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void ClickClientPoint(IntPtr hwnd, double relativeX, double relativeY)
+    {
+        if (!GetClientRect(hwnd, out var rect))
+        {
+            return;
+        }
+
+        var point = new NativePoint
+        {
+            X = (int)(rect.Right * relativeX),
+            Y = (int)(rect.Bottom * relativeY)
+        };
+
+        if (!ClientToScreen(hwnd, ref point))
+        {
+            return;
+        }
+
+        SetCursorPos(point.X, point.Y);
+        Thread.Sleep(120);
+        mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
+        Thread.Sleep(80);
+        mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
+    }
+
+    private static void PressEnterKey()
+    {
+        keybd_event(0x0D, 0, 0, UIntPtr.Zero);
+        Thread.Sleep(60);
+        keybd_event(0x0D, 0, 2, UIntPtr.Zero);
+    }
+
+    private const byte VkEscape = 0x1B;
+    private const byte EscapeScanCode = 0x01;
+    private const byte EnterScanCode = 0x1C;
+
+    private async Task<bool> ExitToMainMenuViaUiAsync(Process process, CancellationToken token)
+    {
+        await Task.Run(() =>
+        {
+            process.Refresh();
+            var hwnd = process.MainWindowHandle;
+            if (hwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            ShowWindow(hwnd, 9);
+            ShowWindow(hwnd, 5);
+            SetForegroundWindow(hwnd);
+            Thread.Sleep(400);
+
+            keybd_event(VkEscape, EscapeScanCode, 0, UIntPtr.Zero);
+            Thread.Sleep(80);
+            keybd_event(VkEscape, EscapeScanCode, 2, UIntPtr.Zero);
+        }, token);
+
+        await Task.Delay(1800, token);
+
+        await Task.Run(() =>
+        {
+            process.Refresh();
+            var hwnd = process.MainWindowHandle;
+            if (hwnd != IntPtr.Zero)
+            {
+                ClickClientPoint(hwnd, 0.5148, 0.5306);
+            }
+        }, token);
+
+        await Task.Delay(2500, token);
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            await Task.Run(() =>
+            {
+                process.Refresh();
+                var hwnd = process.MainWindowHandle;
+                if (hwnd != IntPtr.Zero)
+                {
+                    ClickClientPoint(hwnd, 0.4625, 0.5417);
+                }
+            }, token);
+
+            await Task.Delay(1000, token);
+        }
+
+        var exited = await WaitForMainMenuAsync(process.Id, TimeSpan.FromSeconds(20), token);
+        if (!exited)
+        {
+            await Task.Run(() =>
+            {
+                keybd_event(0x0D, EnterScanCode, 0, UIntPtr.Zero);
+                Thread.Sleep(80);
+                keybd_event(0x0D, EnterScanCode, 2, UIntPtr.Zero);
+            }, token);
+            await Task.Delay(1500, token);
+            exited = await WaitForMainMenuAsync(process.Id, TimeSpan.FromSeconds(20), token);
+        }
+
+        return exited;
     }
 }
